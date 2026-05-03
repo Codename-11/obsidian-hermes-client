@@ -253,7 +253,8 @@
 .hermes-composer-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 6px;
 }
@@ -383,4 +384,273 @@
 
 .hermes-send-button:hover {
   filter: brightness(1.05);
+}
+
+.hermes-server-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 6px 12px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.hermes-meta-pill {
+  max-width: 100%;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hermes-meta-pill.is-good {
+  border-color: color-mix(in srgb, var(--color-green) 45%, var(--background-modifier-border));
+  color: var(--color-green);
+}
+
+.hermes-meta-pill.is-muted {
+  color: var(--text-faint);
+}
+
+.hermes-status-spinner {
+  display: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--background-modifier-border);
+  border-top-color: var(--interactive-accent);
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.hermes-status.is-streaming .hermes-status-spinner {
+  display: inline-block;
+  animation: hermes-spin 720ms linear infinite;
+}
+
+@keyframes hermes-spin {
+  to { transform: rotate(360deg); }
+}
+
+.hermes-command-panel {
+  display: none;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+  margin: 0 0 8px;
+  padding: 8px;
+}
+
+.hermes-command-panel.is-visible {
+  display: block;
+}
+
+.hermes-command-search {
+  width: 100%;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  padding: 7px 9px;
+  font-size: 12px;
+}
+
+.hermes-command-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.hermes-command-mode {
+  color: var(--text-faint);
+  font-size: 11px;
+  padding: 2px 1px 5px;
+}
+
+.hermes-command-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  width: 100%;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  color: var(--text-muted);
+  padding: 7px 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hermes-command-row:hover {
+  border-color: var(--interactive-accent);
+  color: var(--text-normal);
+}
+
+.hermes-command-usage,
+.hermes-command-desc {
+  min-width: 0;
+}
+
+.hermes-command-name {
+  color: var(--text-accent);
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.hermes-command-aliases,
+.hermes-command-category {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.hermes-command-aliases {
+  display: block;
+  margin-top: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.hermes-command-desc {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.hermes-command-category {
+  justify-self: end;
+  align-self: start;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
+.hermes-thinking-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+}
+
+.hermes-thinking-orb {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--interactive-accent);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--interactive-accent) 40%, transparent);
+  animation: hermes-orb 1.05s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes hermes-orb {
+  0%, 100% {
+    transform: scale(0.8);
+    opacity: 0.55;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--interactive-accent) 35%, transparent);
+  }
+  50% {
+    transform: scale(1.14);
+    opacity: 1;
+    box-shadow: 0 0 0 8px transparent;
+  }
+}
+
+.hermes-thinking-text {
+  font-size: 12px;
+}
+
+.hermes-stream-panel {
+  margin-top: 6px;
+  margin-right: 8%;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-primary-alt);
+  padding: 7px 8px;
+}
+
+.hermes-thinking-details summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.hermes-thinking-details pre {
+  max-height: 160px;
+  overflow: auto;
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.hermes-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.hermes-thinking-details + .hermes-activity-list {
+  margin-top: 7px;
+}
+
+.hermes-activity {
+  display: grid;
+  grid-template-columns: 8px minmax(72px, auto) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.hermes-activity-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text-faint);
+}
+
+.hermes-activity-thinking .hermes-activity-dot {
+  background: var(--interactive-accent);
+  animation: hermes-pulse 1s ease-in-out infinite;
+}
+
+.hermes-activity-tool .hermes-activity-dot,
+.hermes-activity-run .hermes-activity-dot {
+  background: var(--color-blue);
+}
+
+.hermes-activity-error .hermes-activity-dot {
+  background: var(--color-red);
+}
+
+.hermes-activity-label {
+  color: var(--text-normal);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.hermes-activity-detail {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-faint);
+}
+
+.hermes-run-stats {
+  margin-top: 6px;
+  color: var(--text-faint);
+  font-size: 10px;
 }
