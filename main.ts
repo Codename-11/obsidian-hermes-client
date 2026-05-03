@@ -1,5 +1,6 @@
 import {
   App,
+  addIcon,
   ItemView,
   MarkdownRenderer,
   Notice,
@@ -19,6 +20,15 @@ const MAX_ATTACHMENTS = 6;
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const DEFAULT_ASSISTANT_LABEL = "Hermes";
 const MAX_VOICE_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+const HERMES_CLIENT_ICON = `
+<path d="M12 2.6 18.8 7.5 17 18.6 12 24 7 18.6 5.2 7.5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+<path d="M12 2.6v21.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity="0.55"/>
+<path d="M5.2 7.5 12 10.7 18.8 7.5" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" opacity="0.55"/>
+<path d="M12 10.7 17 18.6 12 24 7 18.6Z" fill="currentColor" opacity="0.16"/>
+<path d="M12 3.1c4.9 0 8.9 4 8.9 8.9 0 2.1-.7 4.1-2 5.6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.28"/>
+<path d="M5.1 17.6A8.8 8.8 0 0 1 3.1 12C3.1 7.1 7.1 3.1 12 3.1" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.18"/>
+`;
 
 
 type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
@@ -674,7 +684,8 @@ export default class HermesClientPlugin extends Plugin {
 
     this.registerView(VIEW_TYPE_HERMES_CHAT, (leaf) => new HermesChatView(leaf, this));
 
-    this.addRibbonIcon("message-square", "Hermes Client", () => this.activateView());
+    addIcon("hermes-client", HERMES_CLIENT_ICON);
+    this.addRibbonIcon("hermes-client", "Hermes Client", () => this.activateView());
 
     this.addCommand({
       id: "toggle-chat-sidebar",

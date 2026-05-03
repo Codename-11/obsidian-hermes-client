@@ -1,7 +1,7 @@
 {
   "id": "hermes-client",
   "name": "Hermes Client",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "minAppVersion": "1.0.0",
   "description": "Chat with a Hermes Agent API Server from an Obsidian sidebar.",
   "author": "Codename_11, forked from ObsidianClaw by Humanity Labs",

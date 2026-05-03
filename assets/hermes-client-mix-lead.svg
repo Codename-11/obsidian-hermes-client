@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-labelledby="title desc">
+  <title id="title">Hermes Client icon</title>
+  <desc id="desc">Dark Obsidian-style crystal glyph with a subtle cyan MorphingSphere and ASCII particle field behind it.</desc>
+  <defs>
+    <radialGradient id="sphereCyan" cx="45%" cy="35%" r="70%">
+      <stop offset="0" stop-color="#f7feff" stop-opacity="0.88"/>
+      <stop offset="0.18" stop-color="#98f2ff" stop-opacity="0.70"/>
+      <stop offset="0.48" stop-color="#3bb8f0" stop-opacity="0.46"/>
+      <stop offset="0.78" stop-color="#0e315a" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#03060a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="cyanStroke" x1="78" y1="56" x2="238" y2="278" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e9fdff" stop-opacity="0.80"/>
+      <stop offset="0.34" stop-color="#74e7ff" stop-opacity="0.54"/>
+      <stop offset="0.72" stop-color="#3bb8f0" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#3bb8f0" stop-opacity="0.18"/>
+    </linearGradient>
+    <pattern id="asciiSparse" width="22" height="22" patternUnits="userSpaceOnUse">
+      <text x="1" y="14" fill="#cbf8ff" fill-opacity="0.23" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">·</text>
+      <text x="12" y="20" fill="#3bb8f0" fill-opacity="0.15" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">*</text>
+    </pattern>
+    <filter id="lowGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 .23 0 0 0 0 .72 0 0 0 0 .94 0 0 0 .36 0"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="320" height="320" rx="72" fill="#08080d"/>
+  <circle cx="160" cy="154" r="106" fill="url(#sphereCyan)" opacity="0.76" filter="url(#lowGlow)"/>
+  <circle cx="160" cy="154" r="94" fill="url(#asciiSparse)" opacity="0.64"/>
+  <path d="M160 58 228 108 210 222 160 278 110 222 92 108Z" fill="#08090f" stroke="url(#cyanStroke)" stroke-width="4.4" stroke-linejoin="round"/>
+  <path d="M160 58 160 278 110 222 92 108Z" fill="#1b1430" opacity="0.88"/>
+  <path d="M160 58 228 108 160 138 92 108Z" fill="#efeaff" opacity="0.22"/>
+  <path d="M160 138 228 108 210 222 160 278Z" fill="#080b12" opacity="0.92"/>
+  <path d="M160 138 110 222 160 278Z" fill="#22143d" opacity="0.72"/>
+  <path d="M160 58v220" stroke="#dffaff" stroke-opacity="0.18" stroke-width="3"/>
+  <path d="M92 108 160 138 228 108" fill="none" stroke="#dffaff" stroke-opacity="0.18" stroke-width="3"/>
+</svg>

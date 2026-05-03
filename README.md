@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/hermes-client-mix-lead.svg" alt="Hermes Client Obsidian icon" width="128" height="128">
+</p>
+
 # Hermes Client for Obsidian
 
 **Chat with any reachable Hermes Agent API Server from an Obsidian sidebar.**
@@ -8,7 +12,7 @@ The plugin is intentionally generic. It does not assume a specific profile name,
 
 ## Current Status
 
-Usable `0.1.2` Hermes-native text, image, and Relay-style voice chat bridge with event-aware streaming UI.
+Usable `0.1.3` Hermes-native text, image, and Relay-style voice chat bridge with event-aware streaming UI plus the Mix Lead Obsidian/MorphingSphere icon set.
 
 - Plugin id: `hermes-client`
 - Backend: Hermes Agent API Server
@@ -20,6 +24,7 @@ Usable `0.1.2` Hermes-native text, image, and Relay-style voice chat bridge with
 - Server metadata: displays safe model/provider/platform hints when exposed by Hermes
 - Image input: paste, drag/drop, or file picker image attachments
 - Voice: Hermes-native MediaRecorder dictation, API Server STT, sentence-chunked TTS playback, barge-in stop path, and MorphingSphere-style voice state UI
+- Icon: custom Mix Lead Obsidian/MorphingSphere mark for the repo, landing page, and Obsidian ribbon
 
 ## Features
 
@@ -31,6 +36,7 @@ Usable `0.1.2` Hermes-native text, image, and Relay-style voice chat bridge with
 - **Relay-style voice mode** — record with MediaRecorder, upload audio to Hermes STT, send the transcript into the active session, stream assistant text, synthesize sentence chunks through Hermes TTS, and play the queue immediately.
 - **Barge-in path** — starting a new dictation stops current TTS playback and aborts the active stream if one is running.
 - **MorphingSphere voice UI** — listening/thinking/speaking/error state with mic/output analyser-driven amplitude.
+- **Custom Hermes Client icon** — dark Obsidian-style glyph with a subtle cyan MorphingSphere/ASCII field, packaged as `assets/hermes-client-mix-lead.svg` and a simplified Obsidian ribbon glyph.
 - **Session list** — create and switch Obsidian-sourced Hermes sessions.
 - **Hermes command palette** — searchable command hints; dynamically upgrades to native command metadata/execution if the API Server exposes `/api/commands` and `/api/sessions/{id}/commands`.
 - **Safe metadata header** — shows non-secret platform/model/provider/capability hints when available.
@@ -179,7 +185,7 @@ See [`SECURITY.md`](SECURITY.md) for deployment guidance.
 
 Voice support is Hermes-native: provider keys and STT/TTS configuration stay in Hermes, while this plugin only captures audio and plays returned audio.
 
-Current v0.1.2 behavior:
+Current behavior:
 
 - **Dictate** records a single utterance with `MediaRecorder` and uploads it as multipart audio to `POST /api/audio/transcriptions`.
 - The returned transcript is sent to the active Hermes session using the same chat/SSE path as typed messages.

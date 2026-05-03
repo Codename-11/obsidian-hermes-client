@@ -1,6 +1,6 @@
 {
   "name": "obsidian-hermes-client",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Generic Hermes Agent API Server chat sidebar client for Obsidian, forked from ObsidianClaw.",
   "main": "main.js",
   "scripts": {
