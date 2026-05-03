@@ -1,7 +1,7 @@
 {
   "id": "hermes-client",
   "name": "Hermes Client",
-  "version": "0.42.0",
+  "version": "0.1.0",
   "minAppVersion": "1.0.0",
   "description": "Chat with Victor/Hermes from an Obsidian sidebar through the Hermes API Server.",
   "author": "Codename_11 / Axiom Labs, forked from ObsidianClaw by Humanity Labs",
