@@ -15,6 +15,9 @@ import * as https from "https";
 const VIEW_TYPE_HERMES_CHAT = "hermes-chat";
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8642";
 const PLUGIN_SOURCE = "obsidian";
+const MAX_ATTACHMENTS = 6;
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const DEFAULT_ASSISTANT_LABEL = "Hermes";
 
 type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
 type ConnectionState = "unknown" | "connected" | "unauthorized" | "disconnected" | "streaming";
@@ -28,6 +31,8 @@ interface HermesClientSettings {
   defaultSessionTitle: string;
   systemMessage: string;
   defaultModel: string;
+  assistantLabel: string;
+  streamResponses: boolean;
   autoOpenSidebar: boolean;
 }
 
@@ -55,6 +60,24 @@ interface ChatMessage {
   content: string;
   timestamp?: number | null;
   transient?: boolean;
+  attachmentNames?: string[];
+}
+
+interface HermesAttachment {
+  name: string;
+  contentType: string;
+  content: string;
+}
+
+interface PendingAttachment extends HermesAttachment {
+  size: number;
+}
+
+interface HermesChatResponse {
+  final_response?: string;
+  completed?: boolean;
+  partial?: boolean;
+  interrupted?: boolean;
 }
 
 interface SseEvent {
@@ -76,6 +99,8 @@ const DEFAULT_SETTINGS: HermesClientSettings = {
   defaultSessionTitle: "Obsidian Chat",
   systemMessage: "",
   defaultModel: "",
+  assistantLabel: DEFAULT_ASSISTANT_LABEL,
+  streamResponses: true,
   autoOpenSidebar: true,
 };
 
@@ -109,6 +134,16 @@ function contentToString(content: unknown): string {
 function normalizeBaseUrl(raw: string): string {
   const trimmed = raw.trim() || DEFAULT_API_BASE_URL;
   return trimmed.replace(/\/+$/, "");
+}
+
+function assistantLabel(settings: HermesClientSettings): string {
+  return settings.assistantLabel.trim() || DEFAULT_ASSISTANT_LABEL;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function sessionTitle(session: HermesSession): string {
@@ -177,6 +212,7 @@ class HermesApiClient {
   async streamChat(
     sessionId: string,
     message: string,
+    attachments: HermesAttachment[],
     onEvent: (event: SseEvent) => void,
     signal?: AbortSignal
   ): Promise<void> {
@@ -184,14 +220,28 @@ class HermesApiClient {
       {
         method: "POST",
         path: `/api/sessions/${encodeURIComponent(sessionId)}/chat/stream`,
-        body: {
-          message,
-          system_message: this.settings.systemMessage.trim() || null,
-        },
+        body: this.chatBody(message, attachments),
         signal,
       },
       onEvent
     );
+  }
+
+  async chat(sessionId: string, message: string, attachments: HermesAttachment[], signal?: AbortSignal): Promise<HermesChatResponse> {
+    return this.requestJson<HermesChatResponse>({
+      method: "POST",
+      path: `/api/sessions/${encodeURIComponent(sessionId)}/chat`,
+      body: this.chatBody(message, attachments),
+      signal,
+    });
+  }
+
+  private chatBody(message: string, attachments: HermesAttachment[]): Record<string, unknown> {
+    return {
+      message,
+      system_message: this.settings.systemMessage.trim() || null,
+      attachments: attachments.length > 0 ? attachments : undefined,
+    };
   }
 
   private async requestJson<T>(options: RequestOptions): Promise<T> {
@@ -456,6 +506,9 @@ class HermesChatView extends ItemView {
   private statusEl?: HTMLElement;
   private abortController?: AbortController;
   private sending = false;
+  private pendingAttachments: PendingAttachment[] = [];
+  private attachmentsEl?: HTMLElement;
+  private fileInputEl?: HTMLInputElement;
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: HermesClientPlugin) {
     super(leaf);
@@ -530,8 +583,8 @@ class HermesChatView extends ItemView {
 
     const header = root.createDiv({ cls: "hermes-header" });
     const titleWrap = header.createDiv({ cls: "hermes-title-wrap" });
-    titleWrap.createDiv({ text: "Victor", cls: "hermes-title" });
-    titleWrap.createDiv({ text: "Hermes Agent inside Obsidian", cls: "hermes-subtitle" });
+    titleWrap.createDiv({ text: assistantLabel(this.plugin.settings), cls: "hermes-title" });
+    titleWrap.createDiv({ text: "Hermes Agent API client", cls: "hermes-subtitle" });
 
     const headerActions = header.createDiv({ cls: "hermes-header-actions" });
     const refreshButton = headerActions.createEl("button", { cls: "clickable-icon hermes-icon-button", attr: { "aria-label": "Refresh sessions" } });
@@ -552,18 +605,40 @@ class HermesChatView extends ItemView {
     const toolbar = composer.createDiv({ cls: "hermes-composer-toolbar" });
     const noteButton = toolbar.createEl("button", { text: "Current note", cls: "hermes-small-button" });
     noteButton.onclick = () => void this.plugin.askAboutCurrentNote();
+    const attachButton = toolbar.createEl("button", { text: "Attach image", cls: "hermes-small-button" });
+    attachButton.onclick = () => this.fileInputEl?.click();
     const abortButton = toolbar.createEl("button", { text: "Stop", cls: "hermes-small-button hermes-danger-button" });
     abortButton.onclick = () => this.stopStreaming();
+
+    this.fileInputEl = composer.createEl("input", {
+      type: "file",
+      cls: "hermes-hidden-file-input",
+      attr: { accept: "image/*", multiple: "true" },
+    });
+    this.fileInputEl.onchange = () => void this.addFiles(this.fileInputEl?.files);
+    this.attachmentsEl = composer.createDiv({ cls: "hermes-attachments" });
+
+    composer.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      composer.addClass("is-dragging-image");
+    });
+    composer.addEventListener("dragleave", () => composer.removeClass("is-dragging-image"));
+    composer.addEventListener("drop", (event) => {
+      event.preventDefault();
+      composer.removeClass("is-dragging-image");
+      void this.addFiles(event.dataTransfer?.files);
+    });
 
     const row = composer.createDiv({ cls: "hermes-input-row" });
     this.inputEl = row.createEl("textarea", {
       cls: "hermes-input",
       attr: {
-        placeholder: "Chat with Victor...",
+        placeholder: "Chat with Hermes... Paste or drop images to attach.",
         rows: "1",
       },
     });
     this.inputEl.addEventListener("input", () => this.autoResizeInput());
+    this.inputEl.addEventListener("paste", (event: ClipboardEvent) => void this.handlePaste(event));
     this.inputEl.addEventListener("keydown", (event: KeyboardEvent) => {
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
@@ -574,6 +649,8 @@ class HermesChatView extends ItemView {
     const sendButton = row.createEl("button", { cls: "hermes-send-button", attr: { "aria-label": "Send" } });
     setIcon(sendButton, "send");
     sendButton.onclick = () => void this.sendCurrentInput();
+
+    this.renderAttachments();
   }
 
   private async bootstrap(): Promise<void> {
@@ -658,14 +735,14 @@ class HermesChatView extends ItemView {
     if (this.messages.length === 0) {
       const empty = this.messagesEl.createDiv({ cls: "hermes-empty" });
       empty.createDiv({ text: "No messages yet.", cls: "hermes-empty-title" });
-      empty.createDiv({ text: "Ask Victor something, or use Current note to pull this note into context.", cls: "hermes-empty-subtitle" });
+      empty.createDiv({ text: `Ask ${assistantLabel(this.plugin.settings)} something, paste an image, or use Current note for context.`, cls: "hermes-empty-subtitle" });
       return;
     }
 
     for (const message of this.messages) {
       const item = this.messagesEl.createDiv({ cls: `hermes-message hermes-message-${message.role}` });
       const meta = item.createDiv({ cls: "hermes-message-meta" });
-      meta.createSpan({ text: message.role === "user" ? "You" : message.role === "assistant" ? "Victor" : message.role });
+      meta.createSpan({ text: message.role === "user" ? "You" : message.role === "assistant" ? assistantLabel(this.plugin.settings) : message.role });
       const time = formatTime(message.timestamp);
       if (time) meta.createSpan({ text: time, cls: "hermes-message-time" });
 
@@ -675,6 +752,12 @@ class HermesChatView extends ItemView {
       } else {
         bubble.setText(message.content);
       }
+      if (message.attachmentNames?.length) {
+        const list = item.createDiv({ cls: "hermes-message-attachments" });
+        for (const name of message.attachmentNames) {
+          list.createSpan({ text: name, cls: "hermes-message-attachment" });
+        }
+      }
     }
 
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
@@ -683,7 +766,8 @@ class HermesChatView extends ItemView {
   private async sendCurrentInput(): Promise<void> {
     if (!this.inputEl || this.sending) return;
     const text = this.inputEl.value.trim();
-    if (!text) return;
+    const attachments = [...this.pendingAttachments];
+    if (!text && attachments.length === 0) return;
 
     if (!this.plugin.settings.activeSessionId) {
       await this.createSession();
@@ -692,11 +776,13 @@ class HermesChatView extends ItemView {
     if (!sessionId) return;
 
     this.inputEl.value = "";
+    this.pendingAttachments = [];
+    this.renderAttachments();
     this.autoResizeInput();
-    await this.sendMessage(text, sessionId);
+    await this.sendMessage(text || "Please analyze the attached image(s).", sessionId, attachments);
   }
 
-  private async sendMessage(text: string, sessionId: string): Promise<void> {
+  private async sendMessage(text: string, sessionId: string, attachments: PendingAttachment[]): Promise<void> {
     this.sending = true;
     this.abortController = new AbortController();
     const userMessage: ChatMessage = {
@@ -705,6 +791,7 @@ class HermesChatView extends ItemView {
       content: text,
       timestamp: Date.now() / 1000,
       transient: true,
+      attachmentNames: attachments.map((attachment) => attachment.name),
     };
     const assistantMessage: ChatMessage = {
       id: `local-assistant-${Date.now()}`,
@@ -715,17 +802,24 @@ class HermesChatView extends ItemView {
     };
     this.messages.push(userMessage, assistantMessage);
     this.connectionState = "streaming";
-    this.statusText = "Victor is thinking...";
+    this.statusText = `${assistantLabel(this.plugin.settings)} is thinking...`;
     this.renderStatus();
     this.renderMessages();
 
     try {
-      await this.plugin.client().streamChat(
-        sessionId,
-        text,
-        (event) => this.handleStreamEvent(event, assistantMessage),
-        this.abortController.signal
-      );
+      if (this.plugin.settings.streamResponses) {
+        await this.plugin.client().streamChat(
+          sessionId,
+          text,
+          attachments,
+          (event) => this.handleStreamEvent(event, assistantMessage),
+          this.abortController.signal
+        );
+      } else {
+        const response = await this.plugin.client().chat(sessionId, text, attachments, this.abortController.signal);
+        assistantMessage.content = response.final_response || "";
+        this.renderMessages();
+      }
       this.connectionState = "connected";
       this.statusText = "Connected";
       await this.refreshSessions();
@@ -766,6 +860,63 @@ class HermesChatView extends ItemView {
     }
   }
 
+  private async handlePaste(event: ClipboardEvent): Promise<void> {
+    const files = event.clipboardData?.files;
+    if (!files || files.length === 0) return;
+    const imageCount = Array.from(files).filter((file) => file.type.startsWith("image/")).length;
+    if (imageCount === 0) return;
+    event.preventDefault();
+    await this.addFiles(files);
+  }
+
+  private async addFiles(files?: FileList | null): Promise<void> {
+    if (!files || files.length === 0) return;
+    const candidates = Array.from(files).filter((file) => file.type.startsWith("image/"));
+    if (candidates.length === 0) {
+      new Notice("Hermes Client only supports image attachments right now");
+      return;
+    }
+
+    for (const file of candidates) {
+      if (this.pendingAttachments.length >= MAX_ATTACHMENTS) {
+        new Notice(`Attachment limit is ${MAX_ATTACHMENTS} images`);
+        break;
+      }
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        new Notice(`${file.name || "Image"} is too large (${formatBytes(file.size)}); limit is ${formatBytes(MAX_ATTACHMENT_BYTES)}`);
+        continue;
+      }
+      const buffer = Buffer.from(await file.arrayBuffer());
+      this.pendingAttachments.push({
+        name: file.name || `image-${this.pendingAttachments.length + 1}`,
+        contentType: file.type || "image/png",
+        content: buffer.toString("base64"),
+        size: file.size,
+      });
+    }
+    if (this.fileInputEl) this.fileInputEl.value = "";
+    this.renderAttachments();
+  }
+
+  private renderAttachments(): void {
+    if (!this.attachmentsEl) return;
+    this.attachmentsEl.empty();
+    if (this.pendingAttachments.length === 0) {
+      this.attachmentsEl.createSpan({ text: "Paste/drop images or use Attach image.", cls: "hermes-attachment-hint" });
+      return;
+    }
+    for (let index = 0; index < this.pendingAttachments.length; index += 1) {
+      const attachment = this.pendingAttachments[index];
+      const chip = this.attachmentsEl.createDiv({ cls: "hermes-attachment-chip" });
+      chip.createSpan({ text: `${attachment.name} · ${formatBytes(attachment.size)}` });
+      const removeButton = chip.createEl("button", { text: "×", cls: "hermes-attachment-remove", attr: { "aria-label": `Remove ${attachment.name}` } });
+      removeButton.onclick = () => {
+        this.pendingAttachments.splice(index, 1);
+        this.renderAttachments();
+      };
+    }
+  }
+
   private stopStreaming(): void {
     if (!this.abortController) return;
     this.abortController.abort();
@@ -797,7 +948,7 @@ class HermesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Hermes API base URL")
-      .setDesc("Usually http://127.0.0.1:8642 on Docker-Server or your forwarded local endpoint.")
+      .setDesc("Usually http://127.0.0.1:8642 for a local Hermes API Server, or the reachable URL for your own install.")
       .addText((text) => {
         text.setPlaceholder(DEFAULT_API_BASE_URL)
           .setValue(this.plugin.settings.apiBaseUrl)
@@ -839,6 +990,29 @@ class HermesSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.systemMessage)
           .onChange(async (value) => {
             this.plugin.settings.systemMessage = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Assistant label")
+      .setDesc("Display name shown in the sidebar. Use any Hermes profile/persona name, or keep the generic default.")
+      .addText((text) => {
+        text.setPlaceholder(DEFAULT_ASSISTANT_LABEL)
+          .setValue(this.plugin.settings.assistantLabel)
+          .onChange(async (value) => {
+            this.plugin.settings.assistantLabel = value || DEFAULT_ASSISTANT_LABEL;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Stream responses")
+      .setDesc("Use Hermes SSE streaming by default. Turn off only for troubleshooting older API Server installs.")
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.streamResponses)
+          .onChange(async (value) => {
+            this.plugin.settings.streamResponses = value;
             await this.plugin.saveSettings();
           });
       });

@@ -277,6 +277,72 @@
   color: var(--color-red);
 }
 
+.hermes-hidden-file-input {
+  display: none;
+}
+
+.hermes-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  margin-bottom: 6px;
+}
+
+.hermes-attachment-hint {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.hermes-attachment-chip,
+.hermes-message-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 4px 7px;
+}
+
+.hermes-attachment-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hermes-attachment-remove {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.hermes-attachment-remove:hover {
+  color: var(--color-red);
+}
+
+.hermes-composer.is-dragging-image {
+  outline: 2px dashed var(--interactive-accent);
+  outline-offset: -4px;
+  background: var(--background-primary-alt);
+}
+
+.hermes-message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 5px;
+}
+
 .hermes-input-row {
   display: flex;
   align-items: flex-end;
