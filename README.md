@@ -8,7 +8,7 @@ The plugin is intentionally generic. It does not assume a specific profile name,
 
 ## Current Status
 
-Usable `0.1.1` Hermes-native text + image chat bridge with event-aware streaming UI.
+Usable `0.1.2` Hermes-native text, image, and Relay-style voice chat bridge with event-aware streaming UI.
 
 - Plugin id: `hermes-client`
 - Backend: Hermes Agent API Server
@@ -19,7 +19,7 @@ Usable `0.1.1` Hermes-native text + image chat bridge with event-aware streaming
 - Commands: command palette uses `/api/commands` metadata and `/api/sessions/{id}/commands` execution when exposed; otherwise it falls back to safe slash-command insertion hints
 - Server metadata: displays safe model/provider/platform hints when exposed by Hermes
 - Image input: paste, drag/drop, or file picker image attachments
-- Voice: planned post-v1 via Hermes API Server STT/TTS endpoints, not implemented inside the plugin
+- Voice: Hermes-native MediaRecorder dictation, API Server STT, sentence-chunked TTS playback, barge-in stop path, and MorphingSphere-style voice state UI
 
 ## Features
 
@@ -28,6 +28,9 @@ Usable `0.1.1` Hermes-native text + image chat bridge with event-aware streaming
 - **Event-aware activity** — surfaces `tool.progress`, `tool.pending`, `tool.started`, `tool.completed`, `tool.failed`, `skill.loaded`, `memory.updated`, `artifact.created`, `run.completed`, and `done` events when emitted.
 - **Non-stream fallback** — optional setting uses `POST /api/sessions/{id}/chat` for older/troubleshooting installs.
 - **Image attachments** — paste screenshots, drag/drop images, or use **Attach image**. Images are sent as Hermes API `attachments` with `name`, `contentType`, and base64 `content`.
+- **Relay-style voice mode** — record with MediaRecorder, upload audio to Hermes STT, send the transcript into the active session, stream assistant text, synthesize sentence chunks through Hermes TTS, and play the queue immediately.
+- **Barge-in path** — starting a new dictation stops current TTS playback and aborts the active stream if one is running.
+- **MorphingSphere voice UI** — listening/thinking/speaking/error state with mic/output analyser-driven amplitude.
 - **Session list** — create and switch Obsidian-sourced Hermes sessions.
 - **Hermes command palette** — searchable command hints; dynamically upgrades to native command metadata/execution if the API Server exposes `/api/commands` and `/api/sessions/{id}/commands`.
 - **Safe metadata header** — shows non-secret platform/model/provider/capability hints when available.
@@ -57,6 +60,9 @@ POST /api/sessions/{id}/chat/stream
 GET  /api/config             # optional safe model/provider metadata probe
 GET  /api/commands           # optional native command metadata probe
 POST /api/sessions/{id}/commands # optional native command execution
+GET  /api/audio/capabilities # optional voice capability probe
+POST /api/audio/transcriptions # Hermes STT audio upload
+POST /api/audio/speech       # Hermes TTS audio/mpeg response
 ```
 
 Chat request bodies use:
@@ -169,17 +175,19 @@ See [`SECURITY.md`](SECURITY.md) for deployment guidance.
 - Model/provider quality for images depends on the Hermes backend/profile/model you run.
 - No direct note-writing actions yet; future write actions should be explicit and user-targeted.
 
-## Voice Roadmap
+## Voice Mode
 
-Voice support belongs behind Hermes API Server, not inside this plugin.
+Voice support is Hermes-native: provider keys and STT/TTS configuration stay in Hermes, while this plugin only captures audio and plays returned audio.
 
-Desired post-v1 behavior:
+Current v0.1.2 behavior:
 
-- Record audio in the Obsidian sidebar.
-- Send audio to Hermes API Server.
-- Hermes performs STT using its configured provider.
-- Optional TTS replies using Hermes configured TTS provider.
-- Plugin controls only UX; provider keys remain in Hermes.
+- **Dictate** records a single utterance with `MediaRecorder` and uploads it as multipart audio to `POST /api/audio/transcriptions`.
+- The returned transcript is sent to the active Hermes session using the same chat/SSE path as typed messages.
+- **Replies on** enables realtime-feeling TTS: assistant SSE deltas are buffered at sentence boundaries, posted to `POST /api/audio/speech`, and played as an audio queue before the full response is complete.
+- Starting dictation while speech/streaming is active stops playback and aborts the active request as a first-pass barge-in path.
+- Browser speech recognition is intentionally not the primary path; Hermes owns provider selection.
+
+Later true-realtime work can add VAD chunking, partial transcripts, websocket audio streams, and provider-native duplex adapters behind this same client abstraction.
 
 ## Development
 

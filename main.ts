@@ -18,9 +18,12 @@ const PLUGIN_SOURCE = "obsidian";
 const MAX_ATTACHMENTS = 6;
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const DEFAULT_ASSISTANT_LABEL = "Hermes";
+const MAX_VOICE_UPLOAD_BYTES = 25 * 1024 * 1024;
+
 
 type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
 type ConnectionState = "unknown" | "connected" | "unauthorized" | "disconnected" | "streaming";
+type VoiceState = "idle" | "listening" | "thinking" | "speaking" | "error";
 
 type HermesRole = "user" | "assistant" | "system" | "tool" | string;
 
@@ -36,6 +39,7 @@ interface HermesClientSettings {
   showStreamActivity: boolean;
   enableCommandPalette: boolean;
   autoOpenSidebar: boolean;
+  voiceRepliesEnabled: boolean;
 }
 
 interface HermesSession {
@@ -97,6 +101,7 @@ interface HermesServerMetadata {
   apiMode?: string;
   commandsNative: boolean;
   capabilitiesLoaded: boolean;
+  voiceAvailable: boolean;
 }
 
 interface StreamActivity {
@@ -106,6 +111,13 @@ interface StreamActivity {
   detail?: string;
   kind: "thinking" | "tool" | "run" | "error" | "info";
   timestamp: number;
+}
+
+interface HermesAudioCapabilities {
+  success?: boolean;
+  transcription?: { enabled?: boolean; endpoint?: string; provider?: string; model?: string };
+  speech?: { enabled?: boolean; endpoint?: string; provider?: string; model?: string; mime_type?: string };
+  limits?: { max_audio_bytes?: number; max_text_chars?: number };
 }
 
 interface HermesChatResponse {
@@ -139,6 +151,7 @@ const DEFAULT_SETTINGS: HermesClientSettings = {
   showStreamActivity: true,
   enableCommandPalette: true,
   autoOpenSidebar: true,
+  voiceRepliesEnabled: false,
 };
 
 function asString(value: unknown, fallback = ""): string {
@@ -183,6 +196,32 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function pickAudioMimeType(): string {
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+    "audio/ogg;codecs=opus",
+    "audio/ogg",
+  ];
+  const recorder = (window as unknown as { MediaRecorder?: typeof MediaRecorder }).MediaRecorder;
+  if (!recorder?.isTypeSupported) return "";
+  return candidates.find((candidate) => recorder.isTypeSupported(candidate)) || "";
+}
+
+function audioExtensionForMimeType(mimeType: string): string {
+  const base = mimeType.split(";", 1)[0].toLowerCase();
+  if (base === "audio/mp4" || base === "audio/x-m4a") return "m4a";
+  if (base === "audio/ogg") return "ogg";
+  if (base === "audio/mpeg" || base === "audio/mp3") return "mp3";
+  if (base === "audio/wav" || base === "audio/wave") return "wav";
+  return "webm";
+}
+
+function looksLikeCompleteSentence(text: string): RegExpMatchArray | null {
+  return text.match(/^[\s\S]*?[.!?。！？](?=\s|$)/);
+}
+
 function sessionTitle(session: HermesSession): string {
   return session.title?.trim() || session.preview?.trim() || session.id.slice(0, 12);
 }
@@ -209,6 +248,64 @@ class HermesApiClient {
 
   async config(): Promise<Record<string, unknown>> {
     return this.requestJson<Record<string, unknown>>({ method: "GET", path: "/api/config" });
+  }
+
+  async audioCapabilities(): Promise<HermesAudioCapabilities> {
+    return this.requestJson<HermesAudioCapabilities>({ method: "GET", path: "/api/audio/capabilities" });
+  }
+
+  async transcribeAudio(audio: Blob): Promise<string> {
+    if (audio.size <= 0) throw new Error("Recording was empty");
+    if (audio.size > MAX_VOICE_UPLOAD_BYTES) throw new Error(`Recording is too large (${formatBytes(audio.size)}); limit is ${formatBytes(MAX_VOICE_UPLOAD_BYTES)}`);
+    const mimeType = audio.type || "audio/webm";
+    const extension = audioExtensionForMimeType(mimeType);
+    const boundary = `----obsidian-hermes-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+    const audioBuffer = Buffer.from(await audio.arrayBuffer());
+    const head = Buffer.from([
+      `--${boundary}`,
+      `Content-Disposition: form-data; name="file"; filename="obsidian-voice.${extension}"`,
+      `Content-Type: ${mimeType}`,
+      "",
+      "",
+    ].join("\r\n"), "utf8");
+    const tail = Buffer.from(["", `--${boundary}--`, ""].join("\r\n"), "utf8");
+    const body = Buffer.concat([head, audioBuffer, tail]);
+    const response = await this.rawBufferRequest(
+      { method: "POST", path: "/api/audio/transcriptions" },
+      body,
+      {
+        Accept: "application/json",
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+      }
+    );
+    const text = response.body.toString("utf8");
+    const parsed = text ? JSON.parse(text) : {};
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw new Error(extractErrorMessage(parsed, `Hermes audio transcription returned ${response.statusCode}`));
+    }
+    return asString((parsed as { text?: unknown; transcript?: unknown }).text ?? (parsed as { transcript?: unknown }).transcript).trim();
+  }
+
+  async synthesizeSpeech(text: string): Promise<Blob> {
+    const body = Buffer.from(JSON.stringify({ text }), "utf8");
+    const response = await this.rawBufferRequest(
+      { method: "POST", path: "/api/audio/speech" },
+      body,
+      {
+        Accept: "audio/mpeg, application/json",
+        "Content-Type": "application/json",
+      }
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      const raw = response.body.toString("utf8");
+      try {
+        throw new Error(extractErrorMessage(JSON.parse(raw), `Hermes speech synthesis returned ${response.statusCode}`));
+      } catch (error) {
+        if (error instanceof Error && !raw) throw error;
+        throw new Error(raw || `Hermes speech synthesis returned ${response.statusCode}`);
+      }
+    }
+    return new Blob([new Uint8Array(response.body)], { type: "audio/mpeg" });
   }
 
   async listCommands(): Promise<HermesCommand[]> {
@@ -370,16 +467,27 @@ class HermesApiClient {
   }
 
   private async rawRequest(options: RequestOptions): Promise<{ statusCode: number; body: Buffer }> {
+    const body = options.body === undefined ? undefined : Buffer.from(JSON.stringify(options.body), "utf8");
+    return this.rawBufferRequest(options, body, body ? { "Content-Type": "application/json" } : {});
+  }
+
+  private async rawBufferRequest(options: RequestOptions, body?: Buffer, extraHeaders: Record<string, string> = {}): Promise<{ statusCode: number; body: Buffer }> {
     const url = this.urlFor(options.path);
-    const body = options.body === undefined ? undefined : JSON.stringify(options.body);
     const client = url.protocol === "https:" ? https : http;
+    const headers: Record<string, string> = {
+      Accept: "application/json, text/event-stream",
+      "User-Agent": "obsidian-hermes-client",
+      ...extraHeaders,
+    };
+    if (body !== undefined) headers["Content-Length"] = body.length.toString();
+    if (this.settings.apiToken.trim()) headers.Authorization = `Bearer ${this.settings.apiToken.trim()}`;
 
     return new Promise((resolve, reject) => {
       const request = client.request(
         url,
         {
           method: options.method,
-          headers: this.headers(body),
+          headers,
         },
         (response) => {
           const chunks: Buffer[] = [];
@@ -523,7 +631,7 @@ function humanizeModelName(model?: string): string {
     .join(" ");
 }
 
-function safeMetadataFrom(capabilities?: Record<string, unknown>, config?: Record<string, unknown>, commandsNative = false): HermesServerMetadata {
+function safeMetadataFrom(capabilities?: Record<string, unknown>, config?: Record<string, unknown>, commandsNative = false, audio?: HermesAudioCapabilities): HermesServerMetadata {
   const model = asString(capabilities?.model || config?.model);
   const provider = asString(config?.provider);
   const platform = asString(capabilities?.platform || "hermes-agent");
@@ -535,6 +643,7 @@ function safeMetadataFrom(capabilities?: Record<string, unknown>, config?: Recor
     apiMode: asString(config?.api_mode),
     commandsNative,
     capabilitiesLoaded: Boolean(capabilities),
+    voiceAvailable: Boolean(audio?.success && (audio.transcription?.enabled || audio.speech?.enabled)),
   };
 }
 
@@ -682,6 +791,23 @@ class HermesChatView extends ItemView {
   private commands: HermesCommand[] = [...FALLBACK_COMMANDS];
   private commandsNativeAvailable = false;
   private serverMetadata?: HermesServerMetadata;
+  private voiceState: VoiceState = "idle";
+  private voiceStatusText = "Voice ready";
+  private voiceControlsEl?: HTMLElement;
+  private voiceSphereEl?: HTMLElement;
+  private voiceStatusEl?: HTMLElement;
+  private voiceRecordButtonEl?: HTMLButtonElement;
+  private voiceReplyButtonEl?: HTMLButtonElement;
+  private mediaRecorder?: MediaRecorder;
+  private mediaStream?: MediaStream;
+  private recordedChunks: Blob[] = [];
+  private audioContext?: AudioContext;
+  private voiceAnalyser?: AnalyserNode;
+  private voiceAnimationFrame?: number;
+  private currentAudio?: HTMLAudioElement;
+  private ttsBuffer = "";
+  private ttsQueue: Promise<void> = Promise.resolve();
+  private ttsToken = 0;
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: HermesClientPlugin) {
     super(leaf);
@@ -706,6 +832,11 @@ class HermesChatView extends ItemView {
 
   async onClose(): Promise<void> {
     this.abortController?.abort();
+    this.stopRecording(false);
+    this.stopAudioPlayback();
+    this.stopVoiceAnalyser();
+    this.mediaStream?.getTracks().forEach((track) => track.stop());
+    this.mediaStream = undefined;
   }
 
   prefill(text: string): void {
@@ -774,6 +905,18 @@ class HermesChatView extends ItemView {
 
     this.serverMetaEl = root.createDiv({ cls: "hermes-server-meta" });
     this.renderServerMeta();
+
+    this.voiceControlsEl = root.createDiv({ cls: "hermes-voice-panel" });
+    this.voiceSphereEl = this.voiceControlsEl.createDiv({ cls: "hermes-voice-sphere", attr: { "aria-hidden": "true" } });
+    const voiceCopy = this.voiceControlsEl.createDiv({ cls: "hermes-voice-copy" });
+    voiceCopy.createDiv({ text: "Voice", cls: "hermes-voice-title" });
+    this.voiceStatusEl = voiceCopy.createDiv({ text: this.voiceStatusText, cls: "hermes-voice-status" });
+    const voiceActions = this.voiceControlsEl.createDiv({ cls: "hermes-voice-actions" });
+    this.voiceRecordButtonEl = voiceActions.createEl("button", { text: "Dictate", cls: "hermes-small-button hermes-voice-record" });
+    this.voiceRecordButtonEl.onclick = () => void this.toggleRecording();
+    this.voiceReplyButtonEl = voiceActions.createEl("button", { text: "Voice replies", cls: "hermes-small-button hermes-voice-replies" });
+    this.voiceReplyButtonEl.onclick = () => void this.toggleVoiceReplies();
+    this.renderVoiceControls();
 
     this.sessionsEl = root.createDiv({ cls: "hermes-sessions" });
     this.messagesEl = root.createDiv({ cls: "hermes-messages" });
@@ -879,12 +1022,17 @@ class HermesChatView extends ItemView {
       text: meta.commandsNative ? "Native commands" : "Command hints",
       cls: `hermes-meta-pill ${meta.commandsNative ? "is-good" : "is-muted"}`,
     });
+    this.serverMetaEl.createSpan({
+      text: meta.voiceAvailable ? "Voice API" : "Voice optional",
+      cls: `hermes-meta-pill ${meta.voiceAvailable ? "is-good" : "is-muted"}`,
+    });
   }
 
   private async loadServerMetadata(): Promise<void> {
     const client = this.plugin.client();
     let capabilities: Record<string, unknown> | undefined;
     let config: Record<string, unknown> | undefined;
+    let audioCapabilities: HermesAudioCapabilities | undefined;
     try {
       capabilities = await client.capabilities();
     } catch {
@@ -896,6 +1044,11 @@ class HermesChatView extends ItemView {
       config = undefined;
     }
     try {
+      audioCapabilities = await client.audioCapabilities();
+    } catch {
+      audioCapabilities = undefined;
+    }
+    try {
       const nativeCommands = await client.listCommands();
       if (nativeCommands.length > 0) {
         this.commands = nativeCommands;
@@ -905,7 +1058,7 @@ class HermesChatView extends ItemView {
       this.commands = [...FALLBACK_COMMANDS];
       this.commandsNativeAvailable = false;
     }
-    this.serverMetadata = safeMetadataFrom(capabilities, config, this.commandsNativeAvailable);
+    this.serverMetadata = safeMetadataFrom(capabilities, config, this.commandsNativeAvailable, audioCapabilities);
     this.updateHeader();
     this.renderCommandPanel();
   }
@@ -1133,8 +1286,10 @@ class HermesChatView extends ItemView {
       activities: [],
     };
     this.messages.push(userMessage, assistantMessage);
+    this.ttsBuffer = "";
     this.connectionState = "streaming";
     this.statusText = `${this.displayName()} is thinking...`;
+    if (this.plugin.settings.voiceRepliesEnabled) this.setVoiceState("thinking", `${this.displayName()} is thinking...`);
     this.renderStatus();
     this.renderMessages();
 
@@ -1152,11 +1307,18 @@ class HermesChatView extends ItemView {
         assistantMessage.content = response.final_response || "";
         this.renderMessages();
       }
+      if (this.plugin.settings.voiceRepliesEnabled) this.flushTtsBuffer(true);
       assistantMessage.streamState = "complete";
       this.connectionState = "connected";
       this.statusText = "Connected";
       await this.refreshSessions();
       await this.loadActiveMessages();
+      if (this.plugin.settings.voiceRepliesEnabled) {
+        const token = this.ttsToken;
+        void this.ttsQueue.finally(() => {
+          if (token === this.ttsToken && this.voiceState !== "listening") this.setVoiceState("idle", "Voice ready");
+        });
+      }
     } catch (error) {
       assistantMessage.streamState = "error";
       assistantMessage.content = `Error: ${error instanceof Error ? error.message : String(error)}`;
@@ -1194,7 +1356,9 @@ class HermesChatView extends ItemView {
 
     if (event.event === "assistant.delta") {
       assistantMessage.streamState = "streaming";
-      assistantMessage.content += asString(event.data.delta);
+      const delta = asString(event.data.delta);
+      assistantMessage.content += delta;
+      this.queueTtsFromDelta(delta);
       this.statusText = `${this.displayName()} is streaming...`;
       this.renderStatus();
       this.renderMessages();
@@ -1204,6 +1368,7 @@ class HermesChatView extends ItemView {
     if (event.event === "assistant.completed") {
       assistantMessage.streamState = "complete";
       assistantMessage.content = asString(event.data.content, assistantMessage.content);
+      if (this.plugin.settings.voiceRepliesEnabled) this.flushTtsBuffer(true);
       const flags = [event.data.partial ? "partial" : "", event.data.interrupted ? "interrupted" : ""].filter(Boolean).join(", ");
       this.addActivity(assistantMessage, event.event, "Assistant completed", flags, "run");
       this.renderMessages();
@@ -1284,6 +1449,249 @@ class HermesChatView extends ItemView {
       }
     }
     if (message.runStats) panel.createDiv({ text: message.runStats, cls: "hermes-run-stats" });
+  }
+
+
+  renderVoiceControls(): void {
+    if (this.voiceControlsEl) {
+      this.voiceControlsEl.toggleClass("is-idle", this.voiceState === "idle");
+      this.voiceControlsEl.toggleClass("is-listening", this.voiceState === "listening");
+      this.voiceControlsEl.toggleClass("is-thinking", this.voiceState === "thinking");
+      this.voiceControlsEl.toggleClass("is-speaking", this.voiceState === "speaking");
+      this.voiceControlsEl.toggleClass("is-error", this.voiceState === "error");
+    }
+    if (this.voiceStatusEl) this.voiceStatusEl.setText(this.voiceStatusText);
+    if (this.voiceRecordButtonEl) {
+      this.voiceRecordButtonEl.setText(this.voiceState === "listening" ? "Stop" : "Dictate");
+      this.voiceRecordButtonEl.toggleClass("is-active", this.voiceState === "listening");
+    }
+    if (this.voiceReplyButtonEl) {
+      this.voiceReplyButtonEl.setText(this.plugin.settings.voiceRepliesEnabled ? "Replies on" : "Replies off");
+      this.voiceReplyButtonEl.toggleClass("is-active", this.plugin.settings.voiceRepliesEnabled);
+    }
+  }
+
+  private setVoiceState(state: VoiceState, text: string): void {
+    this.voiceState = state;
+    this.voiceStatusText = text;
+    this.renderVoiceControls();
+  }
+
+  private async toggleVoiceReplies(): Promise<void> {
+    this.plugin.settings.voiceRepliesEnabled = !this.plugin.settings.voiceRepliesEnabled;
+    await this.plugin.saveSettings();
+    if (!this.plugin.settings.voiceRepliesEnabled) this.stopAudioPlayback();
+    this.setVoiceState("idle", this.plugin.settings.voiceRepliesEnabled ? "Voice replies enabled" : "Voice replies disabled");
+  }
+
+  private async toggleRecording(): Promise<void> {
+    if (this.voiceState === "listening") {
+      this.stopRecording(true);
+      return;
+    }
+    await this.startRecording();
+  }
+
+  private async startRecording(): Promise<void> {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      this.setVoiceState("error", "Microphone capture is unavailable");
+      new Notice("This Obsidian runtime does not expose microphone capture");
+      return;
+    }
+    if (this.sending) this.stopStreaming();
+    this.stopAudioPlayback();
+    this.recordedChunks = [];
+    try {
+      this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = pickAudioMimeType();
+      const options = mimeType ? { mimeType } : undefined;
+      this.mediaRecorder = new MediaRecorder(this.mediaStream, options);
+      this.mediaRecorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data.size > 0) this.recordedChunks.push(event.data);
+      };
+      this.mediaRecorder.onstop = () => void this.handleRecordedAudio(mimeType || this.recordedChunks[0]?.type || "audio/webm");
+      this.mediaRecorder.start();
+      this.startMicAnalyser(this.mediaStream);
+      this.setVoiceState("listening", "Listening… click Stop when done");
+    } catch (error) {
+      this.setVoiceState("error", error instanceof Error ? error.message : "Could not start microphone");
+      new Notice(`Could not start Hermes voice capture: ${error instanceof Error ? error.message : String(error)}`);
+      this.mediaStream?.getTracks().forEach((track) => track.stop());
+      this.mediaStream = undefined;
+    }
+  }
+
+  private stopRecording(userInitiated: boolean): void {
+    if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
+      this.mediaRecorder.stop();
+      if (userInitiated) this.setVoiceState("thinking", "Transcribing…");
+      return;
+    }
+    this.mediaStream?.getTracks().forEach((track) => track.stop());
+    this.mediaStream = undefined;
+    this.stopVoiceAnalyser();
+  }
+
+  private async handleRecordedAudio(mimeType: string): Promise<void> {
+    this.mediaStream?.getTracks().forEach((track) => track.stop());
+    this.mediaStream = undefined;
+    this.stopVoiceAnalyser();
+    const chunks = [...this.recordedChunks];
+    this.recordedChunks = [];
+    this.mediaRecorder = undefined;
+    if (chunks.length === 0) {
+      this.setVoiceState("idle", "No audio captured");
+      return;
+    }
+    const blob = new Blob(chunks, { type: mimeType || chunks[0].type || "audio/webm" });
+    try {
+      this.setVoiceState("thinking", "Transcribing…");
+      const transcript = await this.plugin.client().transcribeAudio(blob);
+      if (!transcript) {
+        this.setVoiceState("idle", "No speech detected");
+        new Notice("Hermes did not detect speech in that recording");
+        return;
+      }
+      if (!this.plugin.settings.activeSessionId) await this.createSession();
+      const sessionId = this.plugin.settings.activeSessionId;
+      if (!sessionId) return;
+      this.setVoiceState("thinking", `Sending: ${transcript.slice(0, 60)}`);
+      await this.sendMessage(transcript, sessionId, []);
+    } catch (error) {
+      this.setVoiceState("error", error instanceof Error ? error.message : "Voice failed");
+      new Notice(`Hermes voice failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private queueTtsFromDelta(delta: string): void {
+    if (!this.plugin.settings.voiceRepliesEnabled || !delta) return;
+    this.ttsBuffer += delta;
+    this.flushTtsBuffer(false);
+  }
+
+  private flushTtsBuffer(force: boolean): void {
+    if (!this.plugin.settings.voiceRepliesEnabled) {
+      this.ttsBuffer = "";
+      return;
+    }
+    while (this.ttsBuffer.trim()) {
+      const match = looksLikeCompleteSentence(this.ttsBuffer);
+      if (!match && !force) return;
+      const next = match ? match[0] : this.ttsBuffer;
+      this.ttsBuffer = this.ttsBuffer.slice(next.length);
+      const sentence = next.trim();
+      if (sentence) this.enqueueSpeech(sentence);
+      if (!match) break;
+    }
+  }
+
+  private enqueueSpeech(text: string): void {
+    const token = this.ttsToken;
+    this.ttsQueue = this.ttsQueue
+      .then(() => this.playSpeech(text, token))
+      .catch((error) => {
+        if (token === this.ttsToken) {
+          this.setVoiceState("error", error instanceof Error ? error.message : "Speech playback failed");
+        }
+      });
+  }
+
+  private async playSpeech(text: string, token: number): Promise<void> {
+    if (!this.plugin.settings.voiceRepliesEnabled || token !== this.ttsToken) return;
+    this.setVoiceState("speaking", "Synthesizing speech…");
+    const blob = await this.plugin.client().synthesizeSpeech(text);
+    if (!this.plugin.settings.voiceRepliesEnabled || token !== this.ttsToken) return;
+    const url = URL.createObjectURL(blob);
+    try {
+      await this.playAudioUrl(url, token);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  private async playAudioUrl(url: string, token: number): Promise<void> {
+    if (token !== this.ttsToken) return;
+    await new Promise<void>((resolve, reject) => {
+      const audio = new Audio(url);
+      this.currentAudio = audio;
+      audio.onended = () => resolve();
+      audio.onerror = () => reject(new Error("Audio playback failed"));
+      this.setVoiceState("speaking", "Speaking…");
+      this.startOutputAnalyser(audio);
+      void audio.play().catch(reject);
+    });
+    if (this.currentAudio?.src === url) this.currentAudio = undefined;
+    this.stopVoiceAnalyser();
+  }
+
+  private stopAudioPlayback(): void {
+    this.ttsToken += 1;
+    this.ttsBuffer = "";
+    this.ttsQueue = Promise.resolve();
+    if (this.currentAudio) {
+      this.currentAudio.pause();
+      this.currentAudio.src = "";
+      this.currentAudio = undefined;
+    }
+    this.stopVoiceAnalyser();
+    if (this.voiceState === "speaking") this.setVoiceState("idle", "Voice ready");
+  }
+
+  private ensureAudioContext(): AudioContext | undefined {
+    const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) return undefined;
+    if (!this.audioContext) this.audioContext = new AudioContextCtor();
+    if (this.audioContext.state === "suspended") void this.audioContext.resume();
+    return this.audioContext;
+  }
+
+  private startMicAnalyser(stream: MediaStream): void {
+    const ctx = this.ensureAudioContext();
+    if (!ctx) return;
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 128;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    this.animateVoiceAnalyser(analyser);
+  }
+
+  private startOutputAnalyser(audio: HTMLAudioElement): void {
+    const ctx = this.ensureAudioContext();
+    if (!ctx) return;
+    try {
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 128;
+      const source = ctx.createMediaElementSource(audio);
+      source.connect(analyser);
+      analyser.connect(ctx.destination);
+      this.animateVoiceAnalyser(analyser);
+    } catch {
+      // Some Electron builds reject repeated media element sources. Playback still works.
+    }
+  }
+
+  private animateVoiceAnalyser(analyser: AnalyserNode): void {
+    this.stopVoiceAnalyser();
+    this.voiceAnalyser = analyser;
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    const tick = () => {
+      analyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (let index = 0; index < data.length; index += 1) {
+        const centered = (data[index] - 128) / 128;
+        sum += centered * centered;
+      }
+      const amplitude = Math.min(1, Math.sqrt(sum / data.length) * 4);
+      this.voiceSphereEl?.setCssProps({ "--voice-amp": amplitude.toFixed(3) });
+      this.voiceAnimationFrame = requestAnimationFrame(tick);
+    };
+    tick();
+  }
+
+  private stopVoiceAnalyser(): void {
+    if (this.voiceAnimationFrame !== undefined) cancelAnimationFrame(this.voiceAnimationFrame);
+    this.voiceAnimationFrame = undefined;
+    this.voiceAnalyser = undefined;
+    this.voiceSphereEl?.setCssProps({ "--voice-amp": "0" });
   }
 
   private toggleCommandPanel(): void {
@@ -1394,6 +1802,7 @@ class HermesChatView extends ItemView {
   }
 
   private stopStreaming(): void {
+    this.stopAudioPlayback();
     if (!this.abortController) return;
     this.abortController.abort();
     this.connectionState = "connected";
@@ -1501,6 +1910,18 @@ class HermesSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.showStreamActivity = value;
             await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Voice replies")
+      .setDesc("Play assistant responses through Hermes TTS using sentence-chunked streamed playback. Microphone dictation is available from the sidebar regardless of this toggle.")
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.voiceRepliesEnabled)
+          .onChange(async (value) => {
+            this.plugin.settings.voiceRepliesEnabled = value;
+            await this.plugin.saveSettings();
+            this.plugin.getChatView()?.renderVoiceControls();
           });
       });
 
