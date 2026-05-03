@@ -1,92 +1,129 @@
-# ObsidianClaw
+# Hermes Client for Obsidian
 
-**Chat with your [OpenClaw](https://openclaw.ai) AI agent directly from Obsidian.**
+**Chat with Victor/Hermes directly from an Obsidian sidebar.**
 
-Your vault becomes the workspace. Your AI lives in the sidebar. No browser tabs, no separate apps — just your notes and your AI, side by side.
+This is a Hermes-native fork of [`oscarhenrycollins/obsidianclaw`](https://github.com/oscarhenrycollins/obsidianclaw). The OpenClaw WebSocket/device-pairing stack has been replaced with a desktop-first Obsidian client for the Hermes API Server.
+
+## Current Status
+
+Usable v1 text-chat bridge.
+
+- Plugin id: `hermes-client`
+- Backend: Hermes API Server
+- Default API URL: `http://127.0.0.1:8642`
+- Install path: BRAT / manual Obsidian plugin install
+- Voice: planned post-v1 via Hermes STT/TTS, not required for v1
 
 ## Features
 
-- **Chat sidebar** — Talk to your AI agent from any Obsidian tab
-- **Streaming responses** — See replies appear in real-time
-- **Markdown rendering** — Code blocks, lists, links rendered natively
-- **Tool call visibility** — See files read/written, commands run, pages fetched
-- **Cross-device sync** — Chat history and tool calls persist via Obsidian Sync
-- **"Ask about this note"** — Send any note as context with one command
-- **Dark/light theme** — Follows your Obsidian theme automatically
+- **Hermes chat sidebar** — talk to Victor from inside the vault
+- **Streaming responses** — reads Hermes SSE events from `/api/sessions/{id}/chat/stream`
+- **Session list** — create and switch Obsidian-sourced Hermes sessions
+- **Native Markdown rendering** — assistant replies render through Obsidian
+- **Current note context** — command/button inserts active note content into the composer
+- **Safe plugin boundary** — plugin reads active note only on explicit action and does not expose autonomous vault mutation tools
+- **Desktop-first networking** — uses Node HTTP/HTTPS from the Obsidian desktop plugin runtime to avoid browser `EventSource`/CORS limitations
 
-## Install
+## Requirements
 
-> **Beta:** Pending approval in the Obsidian Community Plugin store ([PR #10465](https://github.com/obsidianmd/obsidian-releases/pull/10465)). Install via BRAT for now.
+- Obsidian desktop
+- Hermes API Server running and reachable
+- If Hermes API Server has a key configured: the API Server bearer token
 
-1. In Obsidian, go to **Settings → Community Plugins → Browse**
-2. Search **BRAT** → Install → Enable
-3. Go to **Settings → BRAT → Add Beta Plugin**
-4. Enter: `oscarhenrycollins/obsidianclaw`
+Hermes API Server defaults:
 
-That's it. BRAT installs the plugin and keeps it updated. Works on desktop and mobile.
+```text
+GET  /health
+GET  /api/sessions
+POST /api/sessions
+GET  /api/sessions/{id}/messages
+POST /api/sessions/{id}/chat/stream
+GET  /v1/models
+```
 
-## Connect
+## Install via BRAT
 
-The setup wizard opens automatically after install:
+After a release is published with `main.js`, `manifest.json`, and `styles.css` assets:
 
-1. **Gateway URL:** `ws://<your-tailscale-ip>:18789`
-2. **Auth Token:** from `~/.openclaw/openclaw.json` → `gateway.auth.token`
-3. Click **Test connection**
-4. **Approve the device** from the OpenClaw dashboard or CLI:
-   ```bash
-   openclaw devices list
-   openclaw devices approve <requestId>
-   ```
+1. In Obsidian, install and enable **BRAT**.
+2. Go to **Settings → BRAT → Add Beta Plugin**.
+3. Add this repository:
 
-Done. The device is remembered permanently.
+```text
+Codename-11/obsidian-hermes-client
+```
 
-### Prerequisites
+4. Enable **Hermes Client** in Community Plugins.
+5. Open **Settings → Hermes Client** and configure:
+   - Hermes API base URL
+   - API bearer token, if configured
 
-- [OpenClaw](https://openclaw.ai) gateway running somewhere (Mac, Linux, Raspberry Pi)
-- [Tailscale](https://tailscale.com/download) on all your devices
-- Gateway bound to Tailscale: `openclaw config set gateway.bind tailnet && openclaw gateway restart`
+## Manual Development Install
 
-> ⚠️ **OpenClaw 2026.3.x compatibility:** Versions 2026.3.1 through 2026.3.13 have a bug where `app://` origins (used by Obsidian) are silently rejected by the gateway. If you're on 2026.3.x and the plugin can't connect, downgrade to **2026.2.26**: `npm i -g openclaw@2026.2.26 && openclaw gateway restart`. This will be resolved in a future release.
+```bash
+git clone https://github.com/Codename-11/obsidian-hermes-client.git
+cd obsidian-hermes-client
+npm ci
+npm run build
+```
+
+Copy these files into your vault:
+
+```text
+.obsidian/plugins/hermes-client/main.js
+.obsidian/plugins/hermes-client/manifest.json
+.obsidian/plugins/hermes-client/styles.css
+```
+
+Then enable **Hermes Client** in Obsidian.
 
 ## Commands
 
 | Command | Description |
-|---------|-------------|
-| `OpenClaw: Toggle chat sidebar` | Open/close the chat panel |
-| `OpenClaw: Ask about current note` | Send the active note as context |
-| `OpenClaw: Reconnect to gateway` | Re-establish the connection |
-| `OpenClaw: Run setup wizard` | Re-run the onboarding flow |
+| --- | --- |
+| `Hermes Client: Toggle chat sidebar` | Open/reveal the Hermes sidebar |
+| `Hermes Client: Ask about current note` | Insert active note content into the composer |
+| `Hermes Client: New Hermes session` | Create a new Hermes session with `source: obsidian` |
+| `Hermes Client: Test Hermes connection` | Check API reachability |
 
-## Troubleshooting
+## Security Model
 
-**"Could not connect" / "Disconnected"** — Most common cause: the gateway stopped. SSH into your gateway machine and run `openclaw gateway restart`. If that fixes it, the gateway had crashed. Also check: Is Tailscale running on both devices? Is the URL correct (`ws://<tailscale-ip>:18789`)? Is the token right?
+The plugin is intentionally narrow:
 
-**"Pairing required"** — Every new device needs a one-time approval. Run `openclaw devices list` and `openclaw devices approve <requestId>` on your gateway machine, or approve from the dashboard.
+- Stores only Hermes API URL and optional API Server bearer token in Obsidian plugin data.
+- Does **not** store LLM provider keys.
+- Reads current note only when you click/command it.
+- Does not implement vault delete/rename/global replace/command execution tools.
+- Hermes remains the agent runtime and owns tools, memory, STT/TTS, and provider credentials.
 
-**Switching devices** — Force-quit Obsidian and reopen. It picks up synced data from the other device.
+## Voice Roadmap
 
-## Security
+Voice support is planned after the text chat bridge is stable.
 
-Three layers: **Tailscale** encrypts all traffic (WireGuard VPN), **gateway token** authenticates connections, and **Ed25519 device keys** fingerprint each device. Your keys never leave your machine.
+Desired post-v1 behavior:
 
-## Building from Source
+- Record audio in the Obsidian sidebar.
+- Send audio to Hermes API Server.
+- Hermes performs STT using configured provider.
+- Optional TTS replies using Hermes configured TTS provider.
+- Plugin controls only the UX toggle; provider keys remain in Hermes.
+
+## Development
 
 ```bash
-git clone https://github.com/oscarhenrycollins/obsidianclaw.git
-cd obsidianclaw
-npm install
+npm ci
+npm run typecheck
 npm run build
 ```
 
-Copy `main.js`, `manifest.json`, and `styles.css` to `.obsidian/plugins/openclaw/`.
+Release assets for BRAT:
 
-## Links
-
-- [ObsidianClaw](https://obsidianclaw.ai) — Official site
-- [OpenClaw](https://openclaw.ai) — The AI agent framework
-- [Bot Setup Guide](https://botsetupguide.com) — Full setup walkthrough
-- [Humanity Labs](https://humanitylabs.org) — Built by Humanity Labs
+```text
+main.js
+manifest.json
+styles.css
+```
 
 ## License
 
-MIT
+MIT. Forked from ObsidianClaw by Humanity Labs.

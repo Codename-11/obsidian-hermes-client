@@ -30,22 +30,4 @@ esbuild.build({
   treeShaking: true,
   outfile: "main.js",
   minify: prod,
-}).then(async () => {
-  // Copy built files to Obsidian plugin folder
-  const fs = await import("fs");
-  const path = await import("path");
-  // Try multiple possible vault locations
-  const scriptDir = path.dirname(new URL(import.meta.url).pathname);
-  const candidates = [
-    path.join(scriptDir, "../../.obsidian/plugins/openclaw"),          // old: repo at vault root
-    path.join(scriptDir, "../../../.obsidian/plugins/openclaw"),        // new: repo in AGENT-OSCAR/Code/
-    path.join(scriptDir, "../../../../.obsidian/plugins/openclaw"),     // vault is parent of workspace
-  ];
-  const pluginDir = candidates.find(p => fs.existsSync(p)) || candidates[0];
-  if (fs.existsSync(pluginDir)) {
-    fs.copyFileSync("main.js", path.join(pluginDir, "main.js"));
-    fs.copyFileSync("styles.css", path.join(pluginDir, "styles.css"));
-    fs.copyFileSync("manifest.json", path.join(pluginDir, "manifest.json"));
-    console.log("Copied to .obsidian/plugins/openclaw/");
-  }
 }).catch(() => process.exit(1));

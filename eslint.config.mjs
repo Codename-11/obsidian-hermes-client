@@ -21,7 +21,7 @@ export default [
       ...Object.fromEntries(
         Object.entries(obsidian.configs.recommended).map(([key, value]) => [key, value])
       ),
-      // Override sentence-case: brand names (OpenClaw, Tailscale) trigger false positives
+      // Override sentence-case: brand names can trigger false positives in plugin UI strings.
       "obsidianmd/ui/sentence-case": "off",
 
       // TypeScript rules the bot enforces

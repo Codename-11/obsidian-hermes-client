@@ -1,91 +1,59 @@
-# Security Model
+# Security
 
-ObsidianClaw connects your Obsidian vault to an OpenClaw gateway. This document explains how the connection is secured and what data flows where.
+Hermes Client connects Obsidian desktop to a Hermes API Server. This document describes the v1 security boundary.
 
-## Threat Model
+## Assumptions
 
-ObsidianClaw is designed for **personal use** — your devices, your gateway, your data. The security model assumes:
+- You control the Obsidian vault and the Hermes API Server.
+- Hermes API Server is local or reachable over a trusted private network.
+- If the API Server is configured with a key, the plugin stores only that API Server bearer token.
+- LLM provider keys, STT/TTS provider keys, tool credentials, memory, and runtime configuration stay in Hermes.
 
-- You control both the Obsidian client and the OpenClaw gateway
-- Network access is restricted to your devices (via Tailscale or localhost)
-- You trust the machines in your Tailnet
+## Data Stored by the Plugin
 
-## Three-Layer Security
+The plugin stores Obsidian plugin settings only:
 
-### 1. Network Layer: Tailscale WireGuard
+- Hermes API base URL
+- Optional API Server bearer token
+- Active Hermes session id
+- Default session title
+- Optional ephemeral system message
+- UI preferences
 
-For cross-device setups, all traffic flows over [Tailscale](https://tailscale.com), which uses WireGuard encryption:
+Do not put provider API keys in this plugin. Provider credentials belong in Hermes.
 
-- **End-to-end encrypted** between your devices
-- **No ports exposed** to the public internet
-- **Identity-based access** — only your authenticated devices can connect
-- The `ws://` protocol over Tailscale is effectively as secure as `wss://` because WireGuard encrypts at the network layer
+## Data Sent to Hermes
 
-For same-machine setups, traffic stays on localhost (127.0.0.1) and never touches the network.
+The plugin sends only explicit user actions:
 
-### 2. Application Layer: Token Authentication
+- Chat messages typed in the sidebar
+- Active note content when using **Ask about current note** / **Current note**
+- Optional ephemeral system message configured in plugin settings
 
-The gateway requires a shared secret (token) for every WebSocket connection:
+The plugin does not automatically send the whole vault.
 
-- Token is configured in `~/.openclaw/openclaw.json` on the gateway
-- Same token must be provided by the plugin
-- Tokens are compared using constant-time comparison to prevent timing attacks
-- Rate limiting protects against brute-force attempts
+## Vault Mutation Boundary
 
-### 3. Device Layer: Ed25519 Fingerprinting
+Hermes Client v1 does not implement direct vault mutation tools:
 
-Each ObsidianClaw installation has a unique cryptographic identity:
+- no delete
+- no rename
+- no global search/replace
+- no command execution inside Obsidian
+- no autonomous note writes
 
-- **Ed25519 keypair** generated via WebCrypto API on first run
-- **Device ID** = SHA-256 hash of the public key
-- **Every connection is signed** with: device ID, client ID, role, scopes, timestamp, token, and server nonce
-- **Replay protection** via server-issued nonce and timestamp validation (±10 minute window)
-- **Pairing required** — new devices must be explicitly approved by the gateway operator
+Future explicit write buttons may be added, but they should require a user click and a visible target.
 
-This prevents:
-- Stolen tokens from being used on unauthorized devices
-- Replay attacks using captured handshakes
-- Scope escalation without re-pairing
+## Transport
 
-## Data Flow
+The plugin is desktop-only and uses Node HTTP/HTTPS from the Obsidian plugin runtime. This avoids browser `EventSource` limitations for authenticated POST-based SSE streams.
 
-```
-Obsidian Plugin  ←→  [Tailscale WireGuard]  ←→  OpenClaw Gateway
-     ↓                                              ↓
-  Plugin Data                                   Agent Session
-  (data.json)                                   (transcript)
-  - Auth token                                  - Chat history
-  - Ed25519 keys                                - Tool outputs
-  - Gateway URL                                 - Agent state
-```
+Recommended deployment:
 
-### What stays local to Obsidian:
-- Your private key (never transmitted)
-- Plugin settings
-- Vault contents (only sent when you explicitly use "Ask about this note")
+- Keep Hermes API Server bound to localhost or a private network.
+- Use an API Server bearer token if the endpoint is reachable beyond localhost.
+- Prefer HTTPS or a trusted tunnel/VPN for remote access.
 
-### What's sent to the gateway:
-- Auth token (for authentication)
-- Public key + signature (for device verification)
-- Chat messages you type
-- Note content (only when you use the "Ask about this note" command)
+## Voice Roadmap
 
-### What the gateway does NOT receive:
-- Your full vault contents
-- Your Obsidian settings
-- Your private key
-- Any data you don't explicitly send
-
-## Recommendations
-
-1. **Use Tailscale** for cross-device setups — never expose your gateway to the public internet
-2. **Use a strong, unique token** — generate with `openssl rand -hex 24`
-3. **Review paired devices** periodically — `openclaw devices list`
-4. **Revoke unused devices** — `openclaw devices revoke --device <id> --role operator`
-5. **Keep OpenClaw updated** — security patches are applied regularly
-
-## Reporting Vulnerabilities
-
-If you find a security issue, please report it responsibly:
-- Email: security@humanitylabs.org
-- Do not open a public GitHub issue for security vulnerabilities
+Voice support is planned post-v1. When added, audio should be sent to Hermes API Server and processed by Hermes-configured STT/TTS providers. The plugin should not store STT/TTS provider keys.

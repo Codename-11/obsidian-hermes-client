@@ -1,20 +1,23 @@
 {
-  "name": "obsidianclaw",
-  "version": "0.41.1",
-  "description": "Official OpenClaw plugin for Obsidian",
+  "name": "obsidian-hermes-client",
+  "version": "0.42.0",
+  "description": "Hermes/Victor chat sidebar client for Obsidian, forked from ObsidianClaw and retargeted to Hermes API Server.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "node esbuild.config.mjs production"
+    "build": "node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit --skipLibCheck",
+    "lint": "eslint main.ts"
   },
   "keywords": [
     "obsidian",
-    "openclaw",
+    "hermes-agent",
     "ai",
     "agent",
-    "chat"
+    "chat",
+    "brat"
   ],
-  "author": "Humanity Labs",
+  "author": "Codename_11 / Axiom Labs",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.0.0",
