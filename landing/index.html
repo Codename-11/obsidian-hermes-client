@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Hermes Client for Obsidian</title>
-  <meta name="description" content="A desktop Obsidian plugin for chatting with any reachable Hermes Agent API Server, with streaming text, image input, and Hermes-native voice mode.">
+  <meta name="description" content="A desktop Obsidian plugin for chatting with any reachable Hermes Agent API Server, with streaming text, image input, hidden note context, and optional Hermes-Relay voice.">
   <style>
     :root {
       color-scheme: dark;
@@ -162,12 +162,13 @@
         <h1>Chat with Hermes from your vault.</h1>
         <p>
           Hermes Client is a desktop Obsidian plugin for any reachable Hermes Agent API Server.
-          It supports session chat, streaming responses, current-note context, image input, and
-          Relay-style voice without storing provider keys or taking over your vault.
+          It supports session chat, streaming responses, hidden current-note context, image input,
+          and optional Hermes-Relay voice without storing provider keys or taking over your vault.
         </p>
         <div class="actions">
           <a class="button" href="https://github.com/Codename-11/obsidian-hermes-client">GitHub repo</a>
           <a class="button secondary" href="https://hermes-agent.nousresearch.com/docs">Hermes docs</a>
+          <a class="button secondary" href="https://github.com/Codename-11/hermes-relay">Hermes-Relay voice</a>
         </div>
       </div>
       <div class="mark-card" aria-label="Hermes Client Obsidian/MorphingSphere icon">
@@ -186,7 +187,7 @@
       </article>
       <article class="card">
         <h2>Voice-native</h2>
-        <p>MediaRecorder audio goes to Hermes STT; sentence chunks stream back through Hermes TTS for realtime-feeling replies.</p>
+        <p>MediaRecorder audio goes to Hermes API audio routes or Hermes-Relay <code>/voice/*</code>; sentence chunks stream back through Hermes-owned TTS.</p>
       </article>
       <article class="card">
         <h2>Safe boundary</h2>
@@ -194,7 +195,7 @@
       </article>
     </section>
     <footer>
-      BRAT target: <code>Codename-11/obsidian-hermes-client</code>. Release assets: <code>main.js</code>, <code>manifest.json</code>, <code>styles.css</code>. Made with ❤️ by Axiom-Labs.
+      BRAT target: <code>Codename-11/obsidian-hermes-client</code>. Release assets: <code>main.js</code>, <code>manifest.json</code>, <code>styles.css</code>. MIT licensed.
     </footer>
   </main>
 </body>

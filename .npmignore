@@ -1,0 +1,6 @@
+node_modules/
+data.json
+.DS_Store
+.vercel/
+landing/.vercel/
+*.tgz

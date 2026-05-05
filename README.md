@@ -12,7 +12,7 @@ The plugin is intentionally generic. It does not assume a specific profile name,
 
 ## Current Status
 
-Usable `0.1.3` Hermes-native text, image, and Relay-style voice chat bridge with event-aware streaming UI plus the Mix Lead Obsidian/MorphingSphere icon set.
+Usable `0.1.4` Hermes-native text, image, and optional Hermes-Relay voice chat bridge with event-aware streaming UI plus the Mix Lead Obsidian/MorphingSphere icon set.
 
 - Plugin id: `hermes-client`
 - Backend: Hermes Agent API Server
@@ -23,7 +23,7 @@ Usable `0.1.3` Hermes-native text, image, and Relay-style voice chat bridge with
 - Commands: command palette uses `/api/commands` metadata and `/api/sessions/{id}/commands` execution when exposed; otherwise it falls back to safe slash-command insertion hints
 - Server metadata: displays safe model/provider/platform hints when exposed by Hermes
 - Image input: paste, drag/drop, or file picker image attachments
-- Voice: Hermes-native MediaRecorder dictation, API Server STT, sentence-chunked TTS playback, barge-in stop path, and MorphingSphere-style voice state UI
+- Voice: Hermes-native MediaRecorder dictation, Hermes API or optional [Hermes-Relay](https://github.com/Codename-11/hermes-relay) STT/TTS, sentence-chunked playback, barge-in stop path, and MorphingSphere-style voice state UI
 - Icon: custom Mix Lead Obsidian/MorphingSphere mark for the repo, landing page, and Obsidian ribbon
 
 ## Features
@@ -33,7 +33,7 @@ Usable `0.1.3` Hermes-native text, image, and Relay-style voice chat bridge with
 - **Event-aware activity** — surfaces `tool.progress`, `tool.pending`, `tool.started`, `tool.completed`, `tool.failed`, `skill.loaded`, `memory.updated`, `artifact.created`, `run.completed`, and `done` events when emitted.
 - **Non-stream fallback** — optional setting uses `POST /api/sessions/{id}/chat` for older/troubleshooting installs.
 - **Image attachments** — paste screenshots, drag/drop images, or use **Attach image**. Images are sent as Hermes API `attachments` with `name`, `contentType`, and base64 `content`.
-- **Relay-style voice mode** — record with MediaRecorder, upload audio to Hermes STT, send the transcript into the active session, stream assistant text, synthesize sentence chunks through Hermes TTS, and play the queue immediately.
+- **Modular voice mode** — record with MediaRecorder, upload audio to Hermes STT through either `/api/audio/*` or optional [Hermes-Relay](https://github.com/Codename-11/hermes-relay) `/voice/*`, send the transcript into the active session, synthesize sentence chunks through Hermes TTS, and play the queue immediately.
 - **Barge-in path** — starting a new dictation stops current TTS playback and aborts the active stream if one is running.
 - **MorphingSphere voice UI** — listening/thinking/speaking/error state with mic/output analyser-driven amplitude.
 - **Custom Hermes Client icon** — dark Obsidian-style glyph with a subtle cyan MorphingSphere/ASCII field, packaged as `assets/hermes-client-mix-lead.svg` and a simplified Obsidian ribbon glyph.
@@ -41,7 +41,7 @@ Usable `0.1.3` Hermes-native text, image, and Relay-style voice chat bridge with
 - **Hermes command palette** — searchable command hints; dynamically upgrades to native command metadata/execution if the API Server exposes `/api/commands` and `/api/sessions/{id}/commands`.
 - **Safe metadata header** — shows non-secret platform/model/provider/capability hints when available.
 - **Native Markdown rendering** — assistant replies render through Obsidian.
-- **Current note context** — command/button inserts active note content into the composer only when requested.
+- **Current note context** — command/button attaches active note content as hidden one-turn context only when requested.
 - **Configurable assistant label** — display `Hermes`, `Victor`, `Mizu`, or any local profile/persona name without hardcoding it into the plugin.
 - **Safe plugin boundary** — no autonomous vault mutation tools in v1.
 - **Desktop-first networking** — uses Node HTTP/HTTPS from the Obsidian desktop plugin runtime to support authenticated POST-based SSE without browser CORS/EventSource limitations.
@@ -70,6 +70,16 @@ GET  /api/audio/capabilities # optional voice capability probe
 POST /api/audio/transcriptions # Hermes STT audio upload
 POST /api/audio/speech       # Hermes TTS audio/mpeg response
 ```
+
+Optional Hermes-Relay voice backend:
+
+```text
+GET  /voice/config           # Relay STT/TTS capability probe
+POST /voice/transcribe       # Relay STT audio upload
+POST /voice/synthesize       # Relay TTS audio/mpeg response
+```
+
+This mirrors the [Hermes-Relay voice route model](https://github.com/Codename-11/hermes-relay/blob/main/docs/relay-server.md): when Relay voice is selected, Hermes Client sends the same Hermes API bearer token to Relay voice routes. Relay accepts that token only for `/voice/config`, `/voice/transcribe`, and `/voice/synthesize`. Pairing/session-token auth remains the Relay path for bridge, terminal, TUI, media, sessions, clipboard, profile writes, and remote-control capabilities. Non-loopback API-bearer voice calls require HTTPS unless the Relay operator enables the temporary insecure local-network development toggle.
 
 Chat request bodies use:
 
@@ -122,6 +132,8 @@ Codename-11/obsidian-hermes-client
    - **Assistant label** — UI-only display label; defaults to `Hermes`.
    - **Stream responses** — on by default.
    - **Show streaming activity** — on by default.
+   - **Voice backend** — Auto, Hermes API, Hermes Relay, or Disabled.
+   - **Relay voice URL** — optional; set only if using Hermes-Relay `/voice/*`.
    - **Command palette** — on by default; uses native Hermes command endpoints only when exposed.
 
 ## Manual Development Install
@@ -130,15 +142,23 @@ Codename-11/obsidian-hermes-client
 git clone https://github.com/Codename-11/obsidian-hermes-client.git
 cd obsidian-hermes-client
 npm ci
-npm run build
+npm run deploy:local
 ```
 
-Copy these files into your vault:
+`deploy:local` builds the plugin and copies the Obsidian runtime assets into the currently open local vault:
 
 ```text
 .obsidian/plugins/hermes-client/main.js
 .obsidian/plugins/hermes-client/manifest.json
 .obsidian/plugins/hermes-client/styles.css
+```
+
+It also writes `.obsidian/plugins/hermes-client/.hotreload` so the optional Hot Reload plugin can reload Hermes Client automatically after builds.
+
+To target a specific vault instead of the currently open Obsidian vault:
+
+```bash
+npm run deploy:local -- --vault "C:\Path\To\Vault"
 ```
 
 Then enable **Hermes Client** in Obsidian.
@@ -150,9 +170,9 @@ Then enable **Hermes Client** in Obsidian.
 | Command | Description |
 | --- | --- |
 | `Hermes Client: Toggle chat sidebar` | Open/reveal the Hermes sidebar |
-| `Hermes Client: Ask about current note` | Insert active note content into the composer |
+| `Hermes Client: Ask about current note` | Attach active note content as hidden context for the next turn |
 | `Hermes Client: New Hermes session` | Create a new Hermes session with `source: obsidian` |
-| `Hermes Client: Test Hermes connection` | Check API reachability |
+| `Hermes Client: Test Hermes connection` | Check API reachability, session auth, and selected voice capability |
 
 ### Hermes slash commands
 
@@ -165,10 +185,11 @@ The plugin is intentionally narrow:
 - Stores only Hermes API URL, optional API Server bearer token, session id, and UI preferences in Obsidian plugin data.
 - Does **not** store LLM provider keys, STT/TTS provider keys, tool credentials, or Hermes runtime configuration.
 - Sends typed chat text and explicitly attached images.
-- Reads current note only when you click/command it.
+- Reads current note only when you click/command it, then sends it as hidden one-turn context rather than visible chat text.
 - Does not automatically index, upload, or send the whole vault.
 - Does not implement vault delete/rename/global replace tools.
 - Command palette execution is limited to Hermes API Server command endpoints when explicitly exposed by the server; otherwise commands are just inserted text hints.
+- Optional Relay voice sends the Hermes API bearer token only to `/voice/*` routes. Non-localhost HTTP Relay URLs are blocked by default unless the insecure local-network development toggle is enabled.
 - Hermes remains the agent runtime and owns tools, memory, voice providers, model/provider credentials, and external integrations.
 
 See [`SECURITY.md`](SECURITY.md) for deployment guidance.
@@ -183,13 +204,18 @@ See [`SECURITY.md`](SECURITY.md) for deployment guidance.
 
 ## Voice Mode
 
-Voice support is Hermes-native: provider keys and STT/TTS configuration stay in Hermes, while this plugin only captures audio and plays returned audio.
+Voice support is Hermes-native: provider keys and STT/TTS configuration stay in Hermes, while this plugin only captures audio and plays returned audio. For Relay-backed voice, Hermes Client follows Hermes-Relay's documented `/voice/*` capability and auth model. The voice backend is selectable:
+
+- **Auto** — uses Hermes-Relay when a Relay voice URL is configured; otherwise uses Hermes API audio endpoints.
+- **Hermes API** — uses `/api/audio/capabilities`, `/api/audio/transcriptions`, and `/api/audio/speech`.
+- **Hermes Relay** — uses Hermes-Relay `/voice/config`, `/voice/transcribe`, and `/voice/synthesize` with the Hermes API bearer token.
+- **Disabled** — hides the voice panel.
 
 Current behavior:
 
-- **Dictate** records a single utterance with `MediaRecorder` and uploads it as multipart audio to `POST /api/audio/transcriptions`.
+- **Dictate** records a single utterance with `MediaRecorder` and uploads it as multipart audio to the selected STT endpoint.
 - The returned transcript is sent to the active Hermes session using the same chat/SSE path as typed messages.
-- **Replies on** enables realtime-feeling TTS: assistant SSE deltas are buffered at sentence boundaries, posted to `POST /api/audio/speech`, and played as an audio queue before the full response is complete.
+- **Replies on** enables realtime-feeling TTS: assistant SSE deltas are buffered at sentence boundaries, posted to the selected TTS endpoint, and played as an audio queue before the full response is complete.
 - Starting dictation while speech/streaming is active stops playback and aborts the active request as a first-pass barge-in path.
 - Browser speech recognition is intentionally not the primary path; Hermes owns provider selection.
 
@@ -203,6 +229,14 @@ npm run typecheck
 npm run lint
 npm run build
 ```
+
+For local Obsidian iteration:
+
+```bash
+npm run dev:local
+```
+
+This watches `main.ts`, rebuilds `main.js`, and copies `main.js`, `manifest.json`, and `styles.css` to `.obsidian/plugins/hermes-client/` in the local vault after each successful rebuild. Reload Obsidian with `Ctrl+R`, disable/enable the plugin, or install the Hot Reload plugin in the dev vault.
 
 Release assets for BRAT:
 

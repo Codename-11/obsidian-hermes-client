@@ -1,5 +1,12 @@
 /* Hermes Client — Obsidian chat sidebar */
 
+/* Strip the default view-content padding so our header sits flush like the
+   native File Explorer / Bookmarks panes. */
+.workspace-leaf-content[data-type="hermes-chat"] > .view-content {
+  padding: 0;
+  overflow: hidden;
+}
+
 .hermes-client-view,
 .hermes-chat-container {
   height: 100%;
@@ -18,8 +25,14 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 12px 8px;
+  padding: 10px 12px 8px;
   border-bottom: 1px solid var(--background-modifier-border);
+  /* nav-header from Obsidian gives a baseline; override its default padding. */
+  border-top: 0;
+}
+
+.hermes-header.nav-header {
+  background: var(--background-primary);
 }
 
 .hermes-title-wrap {
@@ -45,16 +58,16 @@
 .hermes-header-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   flex-shrink: 0;
 }
 
+/* nav-action-button from Obsidian already supplies hover + sizing; we only
+   force a slightly tighter footprint to fit three buttons in narrow sidebars. */
 .hermes-icon-button {
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 4px;
 }
 
 .hermes-status {
@@ -101,22 +114,65 @@
 }
 
 
-.hermes-voice-panel {
+.hermes-voice-drawer {
   --voice-amp: 0;
+  flex: 0 0 auto;
+  border-top: 1px solid var(--background-modifier-border);
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.hermes-voice-drawer.is-hidden {
+  display: none;
+}
+
+.hermes-voice-drawer-toggle {
+  width: 100%;
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
+  grid-template-columns: 24px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 0;
+  min-height: 40px;
+  padding: 8px 12px;
+  background: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.hermes-voice-drawer.is-open .hermes-voice-drawer-toggle {
+  background: var(--background-primary-alt);
+}
+
+.hermes-voice-drawer-toggle:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.hermes-voice-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+}
+
+.hermes-voice-drawer-body {
+  display: none;
+  grid-template-columns: 52px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--background-modifier-border);
-  background:
-    radial-gradient(circle at 18% 20%, rgba(var(--interactive-accent-rgb), 0.13), transparent 30%),
-    var(--background-primary);
+  padding: 0 12px 10px;
+}
+
+.hermes-voice-drawer.is-open .hermes-voice-drawer-body {
+  display: grid;
 }
 
 .hermes-voice-sphere {
-  width: 34px;
-  height: 34px;
+  width: 24px;
+  height: 24px;
   border-radius: 999px;
   position: relative;
   background:
@@ -128,6 +184,12 @@
   transform: scale(calc(0.94 + (var(--voice-amp) * 0.22)));
   transition: transform 90ms linear, box-shadow 140ms ease, filter 160ms ease;
   overflow: hidden;
+}
+
+.hermes-voice-expanded-sphere {
+  width: 44px;
+  height: 44px;
+  justify-self: center;
 }
 
 .hermes-voice-sphere::before,
@@ -147,20 +209,20 @@
   opacity: 0.7;
 }
 
-.hermes-voice-panel.is-listening .hermes-voice-sphere {
+.hermes-voice-drawer.is-listening .hermes-voice-sphere {
   filter: hue-rotate(76deg) saturate(1.25);
 }
 
-.hermes-voice-panel.is-thinking .hermes-voice-sphere {
+.hermes-voice-drawer.is-thinking .hermes-voice-sphere {
   filter: hue-rotate(200deg) saturate(1.08);
   animation: hermes-pulse 1.1s ease-in-out infinite;
 }
 
-.hermes-voice-panel.is-speaking .hermes-voice-sphere {
+.hermes-voice-drawer.is-speaking .hermes-voice-sphere {
   filter: saturate(1.35) brightness(1.08);
 }
 
-.hermes-voice-panel.is-error .hermes-voice-sphere {
+.hermes-voice-drawer.is-error .hermes-voice-sphere {
   filter: hue-rotate(130deg) saturate(1.45);
 }
 
@@ -196,7 +258,13 @@
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.hermes-voice-actions .hermes-small-button {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .hermes-voice-record.is-active,
@@ -204,60 +272,6 @@
   border-color: var(--interactive-accent);
   color: var(--text-on-accent);
   background: var(--interactive-accent);
-}
-
-.hermes-sessions {
-  display: flex;
-  align-items: stretch;
-  gap: 4px;
-  padding: 8px 8px 6px;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--background-modifier-border);
-}
-
-.hermes-session-tab,
-.hermes-session-empty {
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  background: var(--background-secondary);
-  color: var(--text-muted);
-  padding: 6px 8px;
-  min-width: 104px;
-  max-width: 180px;
-  cursor: pointer;
-  text-align: left;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
-}
-
-.hermes-session-tab:hover,
-.hermes-session-empty:hover {
-  background: var(--background-modifier-hover);
-  color: var(--text-normal);
-}
-
-.hermes-session-tab.is-active {
-  color: var(--text-normal);
-  border-color: var(--interactive-accent);
-  background: var(--background-primary-alt);
-}
-
-.hermes-session-title,
-.hermes-session-meta {
-  display: block;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.hermes-session-title {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.hermes-session-meta {
-  margin-top: 2px;
-  font-size: 10px;
-  color: var(--text-faint);
 }
 
 .hermes-messages {
@@ -352,6 +366,11 @@
 .hermes-composer {
   flex: 0 0 auto;
   padding: 8px;
+  /* Obsidian's persistent status bar overlays the lower right of sidebars.
+     Keep the bottom composer clear without pushing the whole view past 100%. */
+  margin-bottom: 32px;
+  max-height: min(46vh, 430px);
+  overflow: hidden;
   border-top: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
 }
@@ -421,6 +440,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.hermes-note-context-chip {
+  border-color: color-mix(in srgb, var(--interactive-accent) 35%, var(--background-modifier-border));
+  color: var(--text-normal);
 }
 
 .hermes-attachment-remove {
@@ -520,6 +544,16 @@
   color: var(--color-green);
 }
 
+.hermes-meta-pill.is-info {
+  border-color: color-mix(in srgb, var(--color-blue) 45%, var(--background-modifier-border));
+  color: var(--color-blue);
+}
+
+.hermes-meta-pill.is-warn {
+  border-color: color-mix(in srgb, var(--color-yellow) 50%, var(--background-modifier-border));
+  color: var(--color-yellow);
+}
+
 .hermes-meta-pill.is-muted {
   color: var(--text-faint);
 }
@@ -550,6 +584,8 @@
   background: var(--background-secondary);
   margin: 0 0 8px;
   padding: 8px;
+  max-height: min(28vh, 220px);
+  overflow: hidden;
 }
 
 .hermes-command-panel.is-visible {
@@ -571,8 +607,9 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
-  max-height: 220px;
+  max-height: calc(min(28vh, 220px) - 46px);
   overflow-y: auto;
+  padding-right: 2px;
 }
 
 .hermes-command-mode {
@@ -759,4 +796,97 @@
   margin-top: 6px;
   color: var(--text-faint);
   font-size: 10px;
+}
+
+/* ===== Session history modal ===== */
+
+.hermes-history-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.hermes-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.hermes-history-empty {
+  padding: 24px 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.hermes-history-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  padding: 8px 10px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.hermes-history-row:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--interactive-accent);
+}
+
+.hermes-history-row.is-active {
+  border-color: var(--interactive-accent);
+  background: var(--background-primary-alt);
+}
+
+.hermes-history-row-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.hermes-history-row-title > span:first-child {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.hermes-history-active-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--interactive-accent);
+}
+
+.hermes-history-row-meta {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* ===== Narrow-sidebar refinements: keep meta pills + composer toolbar from
+   clipping when the user shrinks the right sidebar. ===== */
+@container (max-width: 280px) {
+  .hermes-server-meta { padding: 4px 8px 6px; }
+  .hermes-meta-pill { font-size: 9.5px; padding: 1px 6px; }
+}
+
+.hermes-server-meta {
+  container-type: inline-size;
+}
+
+/* Stop button on its own line when the toolbar wraps so the destructive
+   action never sits visually merged with the others. */
+.hermes-composer-toolbar .hermes-danger-button {
+  margin-left: auto;
 }

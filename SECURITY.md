@@ -21,6 +21,9 @@ The plugin stores Obsidian plugin settings only:
 - Assistant display label
 - Streaming preference
 - UI preferences
+- Voice backend preference
+- Optional Hermes-Relay voice URL
+- Optional local-network development toggle for insecure Relay voice HTTP
 
 Do not put provider API keys in this plugin. Provider credentials belong in Hermes.
 
@@ -30,8 +33,11 @@ The plugin sends only explicit user actions:
 
 - Chat messages typed in the sidebar
 - Images pasted, dropped, or selected with **Attach image**
-- Active note content when using **Ask about current note** / **Current note**
+- Active note content when using **Ask about current note** / **Current note**, sent as hidden one-turn context rather than visible chat text
+- Safe Obsidian harness context when enabled, such as source, vault name, active note path/title, and current `obsidian://open` route
 - Optional ephemeral system message configured in plugin settings
+- Voice audio recorded after clicking **Dictate**
+- TTS sentence chunks when **Replies on** is enabled
 
 Image attachments are sent to Hermes as request-body `attachments` entries with:
 
@@ -68,6 +74,13 @@ Recommended deployment:
 - Prefer HTTPS or a trusted tunnel/VPN for remote access.
 - Treat the bearer token like a password: do not commit it, paste it into screenshots, or share plugin data files.
 
-## Voice Roadmap
+## Voice Security
 
-Voice support is planned post-v1. When added, audio should be sent to Hermes API Server and processed by Hermes-configured STT/TTS providers. The plugin should not store STT/TTS provider keys.
+Voice support is implemented through Hermes-owned STT/TTS providers. Hermes Client records audio locally only after an explicit user action, uploads it to the selected voice backend, and plays returned audio. The plugin does not store STT/TTS provider keys.
+
+Supported voice backends:
+
+- **Hermes API** — uses `/api/audio/capabilities`, `/api/audio/transcriptions`, and `/api/audio/speech` on the Hermes API Server.
+- **Hermes-Relay** — uses `/voice/config`, `/voice/transcribe`, and `/voice/synthesize` on [Hermes-Relay](https://github.com/Codename-11/hermes-relay).
+
+For Hermes-Relay voice, Hermes Client follows the Relay voice auth boundary: the Hermes API bearer token may be sent only to `/voice/config`, `/voice/transcribe`, and `/voice/synthesize`. Relay pairing/session-token auth remains required for terminal, bridge, TUI, media, sessions, clipboard, profile writes, and Android control routes. Non-loopback API-bearer Relay voice should use HTTPS; the insecure local-network toggle is for temporary development only.
