@@ -12,7 +12,7 @@ The plugin is intentionally generic. It does not assume a specific profile name,
 
 ## Current Status
 
-Usable `0.1.4` Hermes-native text, image, and optional Hermes-Relay voice chat bridge with event-aware streaming UI plus the Mix Lead Obsidian/MorphingSphere icon set.
+Usable `0.1.5` Hermes-native text, image, and optional Hermes-Relay voice chat bridge with event-aware streaming UI plus the Mix Lead Obsidian/MorphingSphere icon set.
 
 - Plugin id: `hermes-client`
 - Backend: Hermes Agent API Server

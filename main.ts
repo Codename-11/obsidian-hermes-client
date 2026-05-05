@@ -150,6 +150,17 @@ interface StreamActivity {
   timestamp: number;
 }
 
+interface RenderedMessageElements {
+  item: HTMLElement;
+  bubble: HTMLElement;
+  activity?: HTMLElement;
+  renderedActivityKey?: string;
+  renderedContent?: string;
+  renderedMarkdown?: boolean;
+  renderedStreamState?: ChatMessage["streamState"];
+  renderedThinking?: string;
+}
+
 interface HermesAudioCapabilities {
   success?: boolean;
   backend?: ResolvedVoiceBackend;
@@ -1164,6 +1175,11 @@ class HermesChatView extends ItemView {
   private commandsNativeAvailable = false;
   private commandsStatusReason = "Command metadata has not been checked yet.";
   private serverMetadata?: HermesServerMetadata;
+  private renderedMessages = new Map<string, RenderedMessageElements>();
+  private pendingMessagePatches = new Set<ChatMessage>();
+  private pendingFinalMarkdownMessageIds = new Set<string>();
+  private pendingStatusRender = false;
+  private streamRenderFrame?: number;
   private voiceState: VoiceState = "idle";
   private voiceStatusText = "Voice ready";
   private voiceStatusReason = "Voice capabilities have not been checked yet.";
@@ -1209,6 +1225,7 @@ class HermesChatView extends ItemView {
 
   async onClose(): Promise<void> {
     this.abortController?.abort();
+    this.clearScheduledStreamUi();
     this.stopRecording(false);
     this.stopAudioPlayback();
     this.stopVoiceAnalyser();
@@ -1679,6 +1696,7 @@ class HermesChatView extends ItemView {
   private renderMessages(): void {
     if (!this.messagesEl) return;
     this.messagesEl.empty();
+    this.renderedMessages.clear();
 
     if (this.messages.length === 0) {
       const empty = this.messagesEl.createDiv({ cls: "hermes-empty" });
@@ -1695,20 +1713,10 @@ class HermesChatView extends ItemView {
       if (time) meta.createSpan({ text: time, cls: "hermes-message-time" });
 
       const bubble = item.createDiv({ cls: "hermes-message-bubble" });
-      if (message.role === "assistant") {
-        if (!message.content && (message.streamState === "thinking" || message.streamState === "streaming")) {
-          const thinking = bubble.createDiv({ cls: "hermes-thinking-placeholder" });
-          thinking.createSpan({ cls: "hermes-thinking-orb" });
-          thinking.createSpan({ text: message.streamState === "streaming" ? "Streaming response" : `${this.displayName()} is thinking`, cls: "hermes-thinking-text" });
-        } else {
-          void MarkdownRenderer.render(this.app, message.content || " ", bubble, "", this);
-        }
-      } else {
-        bubble.setText(message.content);
-      }
-      if (message.role === "assistant" && this.plugin.settings.showStreamActivity && (message.thinking || message.activities?.length || message.runStats)) {
-        this.renderStreamActivity(item, message);
-      }
+      const rendered: RenderedMessageElements = { item, bubble };
+      this.renderedMessages.set(message.id, rendered);
+      this.renderMessageBubble(message, rendered, true, message.streamState !== "thinking" && message.streamState !== "streaming");
+      this.renderMessageActivity(message, rendered, true);
       if (message.attachmentNames?.length) {
         const list = item.createDiv({ cls: "hermes-message-attachments" });
         for (const name of message.attachmentNames) {
@@ -1717,6 +1725,126 @@ class HermesChatView extends ItemView {
       }
     }
 
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  private renderMessageBubble(message: ChatMessage, rendered: RenderedMessageElements, force = false, renderMarkdown = false): void {
+    const content = message.content || "";
+    const thinking = message.thinking || "";
+    const streamState = message.streamState;
+    const shouldRenderMarkdown = message.role === "assistant" && renderMarkdown && streamState !== "thinking" && streamState !== "streaming";
+    if (
+      !force
+      && rendered.renderedContent === content
+      && rendered.renderedThinking === thinking
+      && rendered.renderedStreamState === streamState
+      && rendered.renderedMarkdown === shouldRenderMarkdown
+    ) {
+      return;
+    }
+
+    rendered.bubble.empty();
+    rendered.bubble.toggleClass("is-streaming-text", message.role === "assistant" && !shouldRenderMarkdown && Boolean(content));
+
+    if (message.role === "assistant") {
+      if (!content && (streamState === "thinking" || streamState === "streaming")) {
+        const thinkingPlaceholder = rendered.bubble.createDiv({ cls: "hermes-thinking-placeholder" });
+        thinkingPlaceholder.createSpan({ cls: "hermes-thinking-orb" });
+        thinkingPlaceholder.createSpan({
+          text: streamState === "streaming" ? "Streaming response" : `${this.displayName()} is thinking`,
+          cls: "hermes-thinking-text",
+        });
+      } else if (shouldRenderMarkdown) {
+        void MarkdownRenderer.render(this.app, content || " ", rendered.bubble, "", this);
+      } else {
+        rendered.bubble.setText(content || " ");
+      }
+    } else {
+      rendered.bubble.setText(content);
+    }
+
+    rendered.renderedContent = content;
+    rendered.renderedThinking = thinking;
+    rendered.renderedStreamState = streamState;
+    rendered.renderedMarkdown = shouldRenderMarkdown;
+  }
+
+  private renderMessageActivity(message: ChatMessage, rendered: RenderedMessageElements, force = false): void {
+    const activityKey = this.streamActivityKey(message);
+    if (!force && rendered.renderedActivityKey === activityKey) return;
+    rendered.activity?.remove();
+    rendered.activity = undefined;
+    rendered.renderedActivityKey = activityKey;
+    if (activityKey) rendered.activity = this.renderStreamActivity(rendered.item, message);
+  }
+
+  private streamActivityKey(message: ChatMessage): string {
+    if (
+      message.role !== "assistant"
+      || !this.plugin.settings.showStreamActivity
+      || (!message.thinking && !message.activities?.length && !message.runStats)
+    ) {
+      return "";
+    }
+    const thinking = message.thinking?.trim().slice(-2400) || "";
+    const activities = (message.activities ?? [])
+      .slice(-6)
+      .map((activity) => `${activity.id}:${activity.kind}:${activity.label}:${activity.detail || ""}`)
+      .join("\u001f");
+    return [message.streamState || "", thinking, activities, message.runStats || ""].join("\u001e");
+  }
+
+  private patchRenderedMessage(message: ChatMessage, renderMarkdown = false): void {
+    const rendered = this.renderedMessages.get(message.id);
+    if (!rendered || !rendered.item.isConnected) {
+      this.renderMessages();
+      return;
+    }
+    this.renderMessageBubble(message, rendered, false, renderMarkdown);
+    this.renderMessageActivity(message, rendered);
+    this.scrollMessagesToBottom();
+  }
+
+  private scheduleStreamUi(message?: ChatMessage, renderMarkdown = false): void {
+    if (message) {
+      this.pendingMessagePatches.add(message);
+      if (renderMarkdown) this.pendingFinalMarkdownMessageIds.add(message.id);
+    }
+    this.pendingStatusRender = true;
+    if (this.streamRenderFrame !== undefined) return;
+    this.streamRenderFrame = requestAnimationFrame(() => this.flushStreamUi());
+  }
+
+  private flushStreamUi(): void {
+    this.cancelStreamRenderFrame();
+    const shouldRenderStatus = this.pendingStatusRender;
+    const messages = [...this.pendingMessagePatches];
+    this.pendingStatusRender = false;
+    this.pendingMessagePatches.clear();
+
+    if (shouldRenderStatus) this.renderStatus();
+    for (const message of messages) {
+      const renderMarkdown = this.pendingFinalMarkdownMessageIds.has(message.id);
+      this.pendingFinalMarkdownMessageIds.delete(message.id);
+      this.patchRenderedMessage(message, renderMarkdown);
+    }
+  }
+
+  private cancelStreamRenderFrame(): void {
+    if (this.streamRenderFrame === undefined) return;
+    cancelAnimationFrame(this.streamRenderFrame);
+    this.streamRenderFrame = undefined;
+  }
+
+  private clearScheduledStreamUi(): void {
+    this.cancelStreamRenderFrame();
+    this.pendingMessagePatches.clear();
+    this.pendingFinalMarkdownMessageIds.clear();
+    this.pendingStatusRender = false;
+  }
+
+  private scrollMessagesToBottom(): void {
+    if (!this.messagesEl) return;
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
   }
 
@@ -1852,15 +1980,17 @@ class HermesChatView extends ItemView {
           this.abortController.signal,
           harnessContext,
         );
+        this.flushStreamUi();
       } else {
         const response = await this.plugin.client().chat(sessionId, text, attachments, this.abortController.signal, harnessContext);
         assistantMessage.content = response.final_response || "";
-        this.renderMessages();
       }
       if (this.plugin.settings.voiceRepliesEnabled) this.flushTtsBuffer(true);
       assistantMessage.streamState = "complete";
       this.connectionState = "connected";
       this.statusText = "Connected";
+      this.renderStatus();
+      this.patchRenderedMessage(assistantMessage, true);
       await this.refreshSessions();
       await this.loadActiveMessages();
       if (this.plugin.settings.voiceRepliesEnabled) {
@@ -1870,11 +2000,13 @@ class HermesChatView extends ItemView {
         });
       }
     } catch (error) {
+      this.flushStreamUi();
       assistantMessage.streamState = "error";
       assistantMessage.content = `Error: ${error instanceof Error ? error.message : String(error)}`;
       this.connectionState = "disconnected";
       this.statusText = error instanceof Error ? error.message : "Stream failed";
-      this.renderMessages();
+      this.renderStatus();
+      this.patchRenderedMessage(assistantMessage, true);
     } finally {
       this.sending = false;
       this.abortController = undefined;
@@ -1888,8 +2020,7 @@ class HermesChatView extends ItemView {
     if (event.event === "session.created" || event.event === "run.started" || event.event === "message.started") {
       this.addActivity(assistantMessage, event.event, "Run started", activityDetail(event.data), "run");
       this.statusText = `${this.displayName()} is starting...`;
-      this.renderStatus();
-      this.renderMessages();
+      this.scheduleStreamUi(assistantMessage);
       return;
     }
 
@@ -1899,8 +2030,7 @@ class HermesChatView extends ItemView {
       assistantMessage.streamState = "thinking";
       this.statusText = delta ? `Thinking: ${delta.slice(0, 80)}` : `${this.displayName()} is thinking...`;
       this.addActivity(assistantMessage, event.event, "Thinking", activityDetail(event.data), "thinking");
-      this.renderStatus();
-      this.renderMessages();
+      this.scheduleStreamUi(assistantMessage);
       return;
     }
 
@@ -1910,8 +2040,7 @@ class HermesChatView extends ItemView {
       assistantMessage.content += delta;
       this.queueTtsFromDelta(delta);
       this.statusText = `${this.displayName()} is streaming...`;
-      this.renderStatus();
-      this.renderMessages();
+      this.scheduleStreamUi(assistantMessage);
       return;
     }
 
@@ -1921,7 +2050,7 @@ class HermesChatView extends ItemView {
       if (this.plugin.settings.voiceRepliesEnabled) this.flushTtsBuffer(true);
       const flags = [event.data.partial ? "partial" : "", event.data.interrupted ? "interrupted" : ""].filter(Boolean).join(", ");
       this.addActivity(assistantMessage, event.event, "Assistant completed", flags, "run");
-      this.renderMessages();
+      this.scheduleStreamUi(assistantMessage, true);
       return;
     }
 
@@ -1930,13 +2059,13 @@ class HermesChatView extends ItemView {
       const apiCalls = event.data.api_calls;
       assistantMessage.runStats = typeof apiCalls === "number" ? `${apiCalls} API call${apiCalls === 1 ? "" : "s"}` : "Run completed";
       this.addActivity(assistantMessage, event.event, "Run completed", assistantMessage.runStats, "run");
-      this.renderMessages();
+      this.scheduleStreamUi(assistantMessage, true);
       return;
     }
 
     if (event.event === "done") {
       this.statusText = "Finalized";
-      this.renderStatus();
+      this.scheduleStreamUi();
       return;
     }
 
@@ -1946,14 +2075,13 @@ class HermesChatView extends ItemView {
       const verb = event.event.replace("tool.", "");
       this.statusText = `${tool}: ${detail || verb}`;
       this.addActivity(assistantMessage, event.event, `${tool} ${verb}`, detail, event.event === "tool.failed" ? "error" : "tool");
-      this.renderStatus();
-      this.renderMessages();
+      this.scheduleStreamUi(assistantMessage);
       return;
     }
 
     if (event.event === "skill.loaded" || event.event === "memory.updated" || event.event === "artifact.created") {
       this.addActivity(assistantMessage, event.event, event.event.replace(/\./g, " "), activityDetail(event.data), "info");
-      this.renderMessages();
+      this.scheduleStreamUi(assistantMessage);
       return;
     }
 
@@ -1962,7 +2090,7 @@ class HermesChatView extends ItemView {
       const message = asString(event.data.message, "Hermes stream error");
       assistantMessage.content += `\n\nError: ${message}`;
       this.addActivity(assistantMessage, event.event, "Error", message, "error");
-      this.renderMessages();
+      this.scheduleStreamUi(assistantMessage, true);
     }
   }
 
@@ -1981,7 +2109,7 @@ class HermesChatView extends ItemView {
     if (message.activities.length > 12) message.activities = message.activities.slice(-12);
   }
 
-  private renderStreamActivity(item: HTMLElement, message: ChatMessage): void {
+  private renderStreamActivity(item: HTMLElement, message: ChatMessage): HTMLElement {
     const panel = item.createDiv({ cls: "hermes-stream-panel" });
     if (message.thinking?.trim()) {
       const thinking = panel.createEl("details", { cls: "hermes-thinking-details" });
@@ -1999,6 +2127,7 @@ class HermesChatView extends ItemView {
       }
     }
     if (message.runStats) panel.createDiv({ text: message.runStats, cls: "hermes-run-stats" });
+    return panel;
   }
 
 

@@ -344,6 +344,10 @@
   background: var(--background-secondary);
 }
 
+.hermes-message-assistant .hermes-message-bubble.is-streaming-text {
+  white-space: pre-wrap;
+}
+
 .hermes-message-tool .hermes-message-bubble {
   background: var(--background-primary-alt);
   font-family: var(--font-monospace);
